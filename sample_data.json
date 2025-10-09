@@ -1,0 +1,67 @@
+{
+  "version": "4.0",
+  "timestamp": "2024-01-15T00:00:00.000Z",
+  "accountHolders": [
+    "Ram Sharma",
+    "Sita Thapa"
+  ],
+  "records": [
+    {
+      "id": "sample001",
+      "accountHolder": "Ram Sharma",
+      "bank": "Nabil Bank Limited",
+      "amount": 100000,
+      "duration": 12,
+      "durationUnit": "Months",
+      "rate": 9.25,
+      "startDate": "2024-01-15",
+      "maturityDate": "2025-01-15",
+      "certificateStatus": "Obtained",
+      "notes": "Sample FD - Regular deposit for emergency fund",
+      "createdAt": "2024-01-15T00:00:00.000Z"
+    },
+    {
+      "id": "sample002",
+      "accountHolder": "Sita Thapa",
+      "bank": "Global IME Bank Limited",
+      "amount": 250000,
+      "duration": 24,
+      "durationUnit": "Months",
+      "rate": 10.0,
+      "startDate": "2024-02-01",
+      "maturityDate": "2026-02-01",
+      "certificateStatus": "Obtained",
+      "notes": "Sample FD - Long term investment for house down payment",
+      "createdAt": "2024-02-01T00:00:00.000Z"
+    },
+    {
+      "id": "sample003",
+      "accountHolder": "Ram Sharma",
+      "bank": "NIC Asia Bank Limited",
+      "amount": 150000,
+      "duration": 6,
+      "durationUnit": "Months",
+      "rate": 8.25,
+      "startDate": "2024-06-01",
+      "maturityDate": "2024-12-01",
+      "certificateStatus": "Not Obtained",
+      "notes": "Sample FD - Short term for liquidity",
+      "createdAt": "2024-06-01T00:00:00.000Z"
+    }
+  ],
+  "templates": [
+    {
+      "id": "template001",
+      "name": "Nabil 1-Year Standard",
+      "bank": "Nabil Bank Limited",
+      "duration": 12,
+      "durationUnit": "Months",
+      "rate": 9.25,
+      "createdAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "settings": {
+    "currencySymbol": "NRs",
+    "darkMode": false
+  }
+}

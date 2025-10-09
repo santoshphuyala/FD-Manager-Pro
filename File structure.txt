@@ -1,0 +1,9 @@
+fd-manager-pro/
+├── index.html
+├── css/
+│   └── styles.css
+└── js/
+    ├── app.js (Part 1 - Core & Authentication)
+    ├── app-part2.js (Part 2 - FD Operations & OCR)
+    ├── app-part3.js (Part 3 - Analytics & Export)
+    └── utils.js (Utility Functions)
