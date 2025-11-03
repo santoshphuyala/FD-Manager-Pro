@@ -1,0 +1,12 @@
+{
+  "background_color": "#ffffff",
+  "description": "FD Manager Pro - Nepal Edition - Secure Fixed Deposit Management",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "santoshphuyala.github",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "santoshphuyala.github",
+  "start_url": "/",
+  "theme_color": "#ffffff"
+}
