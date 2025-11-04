@@ -1190,143 +1190,228 @@
                 </div>
             </div>
 
-            <!-- Settings Tab -->
-            <div class="tab-pane fade" id="settings" role="tabpanel">
-                <div class="container-fluid">
-                    <h4 class="mb-3"><i class="bi bi-gear-fill"></i> Settings</h4>
+ <!-- Settings Tab -->
+<div class="tab-pane fade" id="settings" role="tabpanel">
+    <div class="container-fluid">
+        <h4 class="mb-3"><i class="bi bi-gear-fill"></i> Settings</h4>
 
-                    <div class="row">
-                        <div class="col-md-6">
-                            <!-- Account Holder Management -->
-                            <div class="card mb-3">
-                                <div class="card-header">Account Holder Management</div>
-                                <div class="card-body">
-                                    <form onsubmit="addAccountHolder(event)">
-                                        <div class="input-group mb-3">
-                                            <input type="text" class="form-control" id="newAccountHolder" 
-                                                   placeholder="Enter name" required>
-                                            <button type="submit" class="btn btn-primary">
-                                                <i class="bi bi-plus-circle"></i> Add
-                                            </button>
-                                        </div>
-                                    </form>
-                                    <div id="accountHoldersList"></div>
-                                </div>
+        <div class="row">
+            <div class="col-md-6">
+                <!-- Account Holder Management -->
+                <div class="card mb-3">
+                    <div class="card-header bg-primary text-white">
+                        <i class="bi bi-people-fill"></i> Account Holder Management
+                    </div>
+                    <div class="card-body">
+                        <form onsubmit="addAccountHolder(event)">
+                            <div class="input-group mb-3">
+                                <input type="text" class="form-control" id="newAccountHolder" 
+                                       placeholder="Enter name" required>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-plus-circle"></i> Add
+                                </button>
                             </div>
+                        </form>
+                        <div id="accountHoldersList"></div>
+                    </div>
+                </div>
 
-                            <!-- Security Settings -->
-                            <div class="card mb-3">
-                                <div class="card-header">Security</div>
-                                <div class="card-body">
-                                    <button class="btn btn-warning w-100 mb-2" onclick="showChangePIN()">
-                                        <i class="bi bi-key-fill"></i> Change PIN
-                                    </button>
-                                    <button class="btn btn-danger w-100" onclick="showResetConfirm()">
-                                        <i class="bi bi-exclamation-triangle-fill"></i> Reset PIN (Clears All Data)
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Bulk CSV Operations -->
-                            <div class="card mb-3">
-                                <div class="card-header">
-                                    <i class="bi bi-file-earmark-spreadsheet"></i> Bulk CSV Operations
-                                </div>
-                                <div class="card-body">
-                                    <h6 class="mb-3">Import All Data from CSV</h6>
-                                    <input type="file" id="bulkCSVImportFile" accept=".csv" 
-                                           style="display:none;" onchange="handleBulkCSVImport()">
-                                    <button class="btn btn-primary w-100 mb-3" 
-                                            onclick="document.getElementById('bulkCSVImportFile').click()">
-                                        <i class="bi bi-upload"></i> Import CSV (Bulk)
-                                    </button>
-
-                                    <h6 class="mb-3">Export All Data to CSV</h6>
-                                    <button class="btn btn-success w-100" onclick="exportAllToCSV()">
-                                        <i class="bi bi-download"></i> Export All to CSV
-                                    </button>
-                                </div>
+                <!-- Enhanced CSV Import/Export -->
+                <div class="card mb-3">
+                    <div class="card-header bg-success text-white">
+                        <i class="bi bi-file-earmark-spreadsheet"></i> CSV Import/Export
+                    </div>
+                    <div class="card-body">
+                        <!-- CSV Import Section -->
+                        <h6 class="mb-3">
+                            <i class="bi bi-upload"></i> Import from CSV
+                        </h6>
+                        <div class="mb-3">
+                            <label for="bulkCSVImportFile" class="form-label small text-muted">
+                                Select CSV File
+                            </label>
+                            <input type="file" 
+                                   id="bulkCSVImportFile" 
+                                   accept=".csv" 
+                                   class="form-control form-control-sm">
+                            <div class="form-text">
+                                Format: accountHolder, bank, amount, duration, unit, rate, startDate, maturityDate, certificateStatus, notes
                             </div>
                         </div>
-
-                        <div class="col-md-6">
-                            <!-- Backup & Restore -->
-                            <div class="card mb-3">
-                                <div class="card-header">Backup & Restore</div>
-                                <div class="card-body">
-                                    <button class="btn btn-success w-100 mb-2" onclick="backupData()">
-                                        <i class="bi bi-download"></i> Backup All Data (JSON)
-                                    </button>
-                                    <button class="btn btn-primary w-100 mb-2" onclick="document.getElementById('restoreFile').click()">
-                                        <i class="bi bi-upload"></i> Restore Data (JSON)
-                                    </button>
-                                    <input type="file" id="restoreFile" accept=".json" 
-                                           onchange="restoreData()" style="display:none;">
-                                    <button class="btn btn-danger w-100" onclick="clearAllData()">
-                                        <i class="bi bi-trash"></i> Clear All Data
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Display Settings -->
-                            <div class="card mb-3">
-                                <div class="card-header">Display Settings</div>
-                                <div class="card-body">
-                                    <div class="mb-3">
-                                        <label class="form-label">Currency Symbol</label>
-                                        <select class="form-select" id="currencySymbol" onchange="saveSettings()">
-                                            <option value="NRs" selected>NRs (Nepali Rupees)</option>
-                                            <option value="Rs">Rs (Rupees)</option>
-                                            <option value="₹">₹ (Indian Rupee)</option>
-                                            <option value="$">$ (US Dollar)</option>
-                                        </select>
-                                    </div>
-                                    <div class="mb-3">
-                                        <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" 
-                                                   id="darkMode" onchange="toggleTheme()">
-                                            <label class="form-check-label" for="darkMode">
-                                                Dark Mode
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- About -->
-                            <div class="card">
-                                <div class="card-header">About</div>
-                                <div class="card-body">
-                                    <h6>FD Manager Pro - Nepal Edition v4.0</h6>
-                                    <p class="text-muted small mb-2">
-                                        Complete Fixed Deposit Management System<br>
-                                        with OCR, Analytics & Automation
-                                    </p>
-                                    <p class="text-muted small mb-0">
-                                        <strong>Supported Banks:</strong> 27+ Nepal Banks<br>
-                                        <strong>Default Currency:</strong> Nepali Rupees (NRs)<br>
-                                        <strong>Features:</strong> CSV, OCR, Analytics, Backup
-                                    </p>
-                                </div>
-                            </div>
+                        <button class="btn btn-primary w-100 mb-2" 
+                                onclick="handleBulkCSVImportSmart()">
+                            <i class="bi bi-file-earmark-arrow-up"></i> Smart Import CSV
+                        </button>
+                        <div class="alert alert-success alert-sm mb-3">
+                            <i class="bi bi-shield-check"></i> <small><strong>Smart Import Features:</strong></small>
+                            <ul class="mb-0 mt-1 small">
+                                <li>Automatically detects duplicate records</li>
+                                <li>Shows preview before importing</li>
+                                <li>Choose to add new only or update existing</li>
+                            </ul>
                         </div>
+
+                        <hr>
+
+                        <!-- CSV Export Section -->
+                        <h6 class="mb-3">
+                            <i class="bi bi-download"></i> Export to CSV
+                        </h6>
+                        <button class="btn btn-success w-100" onclick="exportAllToCSV()">
+                            <i class="bi bi-download"></i> Export All Records to CSV
+                        </button>
+                        <small class="text-muted d-block mt-2">
+                            <i class="bi bi-info-circle"></i> Downloads all FD records in CSV format
+                        </small>
+                    </div>
+                </div>
+
+                <!-- Security Settings -->
+                <div class="card mb-3">
+                    <div class="card-header bg-warning text-dark">
+                        <i class="bi bi-shield-lock-fill"></i> Security
+                    </div>
+                    <div class="card-body">
+                        <button class="btn btn-warning w-100 mb-2" onclick="showChangePIN()">
+                            <i class="bi bi-key-fill"></i> Change PIN
+                        </button>
+                        <button class="btn btn-danger w-100" onclick="showResetConfirm()">
+                            <i class="bi bi-exclamation-triangle-fill"></i> Reset PIN (Clears All Data)
+                        </button>
                     </div>
                 </div>
             </div>
 
-        </div>
-    </div>
+            <div class="col-md-6">
+                <!-- Enhanced Backup & Restore -->
+                <div class="card mb-3">
+                    <div class="card-header bg-info text-white">
+                        <i class="bi bi-cloud-arrow-down-fill"></i> Backup & Restore
+                    </div>
+                    <div class="card-body">
+                        <!-- Backup Section -->
+                        <h6 class="mb-3">
+                            <i class="bi bi-cloud-arrow-down"></i> Create Backup
+                        </h6>
+                        <p class="text-muted small">
+                            Complete backup including all FDs, account holders, templates, and settings.
+                        </p>
+                        <button class="btn btn-success w-100 mb-3" onclick="backupData()">
+                            <i class="bi bi-download"></i> Download Full Backup (JSON)
+                        </button>
 
-    <!-- Toast Notification -->
-    <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
-        <div id="toast" class="toast" role="alert">
-            <div class="toast-header">
-                <strong class="me-auto">Notification</strong>
-                <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+                        <hr>
+
+                        <!-- Restore Section -->
+                        <h6 class="mb-3">
+                            <i class="bi bi-cloud-arrow-up"></i> Restore from Backup
+                        </h6>
+                        <div class="mb-3">
+                            <label for="restoreFile" class="form-label small text-muted">
+                                Select Backup File
+                            </label>
+                            <input type="file" 
+                                   id="restoreFile" 
+                                   accept=".json" 
+                                   class="form-control form-control-sm">
+                        </div>
+                        <button class="btn btn-warning w-100 mb-2" 
+                                onclick="restoreDataSmart()">
+                            <i class="bi bi-arrow-counterclockwise"></i> Smart Restore Backup
+                        </button>
+                        <div class="alert alert-info alert-sm mb-3">
+                            <i class="bi bi-shield-check"></i> <small><strong>Smart Restore Features:</strong></small>
+                            <ul class="mb-0 mt-1 small">
+                                <li>Preview data before restoring</li>
+                                <li>Detects duplicate records automatically</li>
+                                <li>Choose to merge or replace existing data</li>
+                            </ul>
+                        </div>
+
+                        <hr>
+
+                        <!-- Clear All Data -->
+                        <div class="alert alert-danger mb-0">
+                            <h6 class="alert-heading">
+                                <i class="bi bi-exclamation-triangle-fill"></i> Danger Zone
+                            </h6>
+                            <p class="small mb-2">
+                                This will permanently delete all FD records, account holders, and templates. This action cannot be undone!
+                            </p>
+                            <button class="btn btn-danger btn-sm w-100" onclick="clearAllData()">
+                                <i class="bi bi-trash"></i> Clear All Data
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Display Settings -->
+                <div class="card mb-3">
+                    <div class="card-header bg-secondary text-white">
+                        <i class="bi bi-palette-fill"></i> Display Settings
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Currency Symbol</label>
+                            <select class="form-select" id="currencySymbol" onchange="saveSettings()">
+                                <option value="NRs" selected>NRs (Nepali Rupees)</option>
+                                <option value="Rs">Rs (Rupees)</option>
+                                <option value="₹">₹ (Indian Rupee)</option>
+                                <option value="$">$ (US Dollar)</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" 
+                                       id="darkMode" onchange="toggleTheme()">
+                                <label class="form-check-label" for="darkMode">
+                                    Dark Mode
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- About -->
+                <div class="card">
+                    <div class="card-header bg-dark text-white">
+                        <i class="bi bi-info-circle-fill"></i> About
+                    </div>
+                    <div class="card-body">
+                        <h6 class="mb-2">FD Manager Pro - Nepal Edition v4.0</h6>
+                        <p class="text-muted small mb-3">
+                            Complete Fixed Deposit Management System with Smart Import, OCR, Analytics & Automation
+                        </p>
+                        <table class="table table-sm table-borderless small">
+                            <tr>
+                                <td><strong>Supported Banks:</strong></td>
+                                <td>27+ Nepal Banks</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Default Currency:</strong></td>
+                                <td>Nepali Rupees (NRs)</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Features:</strong></td>
+                                <td>Smart Import, OCR, Analytics, Backup</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Storage:</strong></td>
+                                <td>Local Browser Storage</td>
+                            </tr>
+                        </table>
+                        <div class="alert alert-info alert-sm mb-0">
+                            <small>
+                                <i class="bi bi-shield-lock"></i> All data is stored locally in your browser. 
+                                No data is sent to external servers.
+                            </small>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="toast-body" id="toastMessage"></div>
         </div>
     </div>
+</div>
 
     <!-- CSV Import Hidden Input -->
     <input type="file" id="csvFileInput" accept=".csv" style="display:none;" onchange="handleCSVImport()">
