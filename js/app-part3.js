@@ -1253,21 +1253,27 @@ function handleBulkCSVImportSmart() {
             // Get existing records
             const existingRecords = getData('fd_records') || [];
             
-            // Prepare import records
+            // Prepare import records - FLEXIBLE HEADER MAPPING
             const importRecords = csvRecords.map(csvRecord => {
-                const holderName = (csvRecord.accountholder || '').trim();
+                // Normalize all keys to lowercase for flexible matching
+                const normalized = {};
+                Object.keys(csvRecord).forEach(key => {
+                    normalized[key.toLowerCase().replace(/\s+/g, '')] = csvRecord[key];
+                });
+                
+                const holderName = (normalized.accountholder || '').trim();
                 
                 return {
                     accountHolder: holderName,
-                    bank: (csvRecord.bank || '').trim(),
-                    amount: parseFloat(csvRecord.amount) || 0,
-                    duration: parseInt(csvRecord.duration) || 12,
-                    durationUnit: csvRecord.unit || 'Months',
-                    rate: parseFloat(csvRecord.rate) || 0,
-                    startDate: csvRecord.startdate || '',
-                    maturityDate: csvRecord.maturitydate || '',
-                    certificateStatus: csvRecord.certificatestatus || 'Not Obtained',
-                    notes: csvRecord.notes || ''
+                    bank: (normalized.bank || '').trim(),
+                    amount: parseFloat(normalized.amount) || 0,
+                    duration: parseInt(normalized.duration) || 12,
+                    durationUnit: normalized.unit || normalized.durationunit || 'Months',
+                    rate: parseFloat(normalized.rate || normalized.interestrate) || 0,
+                    startDate: normalized.startdate || '',
+                    maturityDate: normalized.maturitydate || '',
+                    certificateStatus: normalized.certificatestatus || 'Not Obtained',
+                    notes: normalized.notes || ''
                 };
             });
             
@@ -1288,7 +1294,6 @@ function handleBulkCSVImportSmart() {
     
     reader.readAsText(file);
 }
-
 /**
  * Process import based on user selection
  */

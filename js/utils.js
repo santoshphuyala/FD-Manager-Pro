@@ -2,7 +2,9 @@
 // FD Manager Pro - Utility Functions
 // Nepal Edition - Version 4.0
 // ===================================
-
+// TEMPORARY DEBUG - Remove after fixing
+console.log('=== UTILS.JS LOADING ===');
+console.log('showToast function:', typeof showToast);
 // Global Variables
 let pinHash = '';
 let currentEditId = null;
@@ -211,27 +213,276 @@ function formatNumber(num) {
 }
 
 // ===================================
-// Toast Notification
+// Toast Notification System (FIXED - NULL-SAFE)
 // ===================================
 
+/**
+ * Show toast notification with auto-create functionality
+ * @param {string} message - The message to display
+ * @param {string} type - Toast type: 'success', 'error', 'warning', 'info', 'primary'
+ */
 function showToast(message, type = 'info') {
-    const toastEl = document.getElementById('toast');
-    const toastMessage = document.getElementById('toastMessage');
-    
-    toastMessage.textContent = message;
-    
-    toastEl.className = 'toast';
-    if (type === 'success') {
-        toastEl.classList.add('bg-success', 'text-white');
-    } else if (type === 'error') {
-        toastEl.classList.add('bg-danger', 'text-white');
-    } else if (type === 'warning') {
-        toastEl.classList.add('bg-warning');
+    // Ensure DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => showToast(message, type));
+        return;
     }
-    
-    const toast = new bootstrap.Toast(toastEl);
-    toast.show();
+
+    try {
+        // Check if Bootstrap is available
+        if (typeof bootstrap !== 'undefined' && bootstrap.Toast) {
+            showBootstrapToast(message, type);
+        } else {
+            showSimpleToast(message, type);
+        }
+    } catch (error) {
+        console.error('Toast error:', error);
+        // Fallback to console if everything fails
+        console.log(`[${type.toUpperCase()}] ${message}`);
+        showSimpleToast(message, type);
+    }
 }
+
+/**
+ * Bootstrap Toast Implementation
+ */
+function showBootstrapToast(message, type = 'info') {
+    try {
+        let toastContainer = document.getElementById('toastContainer');
+        
+        // Create container if it doesn't exist
+        if (!toastContainer) {
+            toastContainer = document.createElement('div');
+            toastContainer.id = 'toastContainer';
+            toastContainer.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+            toastContainer.style.zIndex = '9999';
+            
+            // Ensure body exists before appending
+            if (document.body) {
+                document.body.appendChild(toastContainer);
+            } else {
+                throw new Error('Document body not ready');
+            }
+        }
+        
+        // Create unique toast ID
+        const toastId = 'toast_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        const toastElement = document.createElement('div');
+        toastElement.id = toastId;
+        toastElement.className = `toast align-items-center text-white bg-${getToastColorClass(type)} border-0`;
+        toastElement.setAttribute('role', 'alert');
+        toastElement.setAttribute('aria-live', 'assertive');
+        toastElement.setAttribute('aria-atomic', 'true');
+        
+        toastElement.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">
+                    ${getToastIcon(type)} ${escapeHtml(message)}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        `;
+        
+        toastContainer.appendChild(toastElement);
+        
+        // Initialize Bootstrap toast
+        const toast = new bootstrap.Toast(toastElement, {
+            autohide: true,
+            delay: type === 'error' || type === 'danger' ? 5000 : 3000
+        });
+        
+        toast.show();
+        
+        // Clean up after hiding
+        toastElement.addEventListener('hidden.bs.toast', () => {
+            if (toastElement.parentElement) {
+                toastElement.remove();
+            }
+        });
+    } catch (error) {
+        console.error('Bootstrap toast failed:', error);
+        showSimpleToast(message, type);
+    }
+}
+
+/**
+ * Simple fallback toast (no Bootstrap required)
+ */
+function showSimpleToast(message, type = 'info') {
+    try {
+        // Ensure body exists
+        if (!document.body) {
+            console.log(`[${type.toUpperCase()}] ${message}`);
+            return;
+        }
+
+        let container = document.getElementById('simpleToastContainer');
+        
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'simpleToastContainer';
+            container.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                z-index: 9999;
+                max-width: 350px;
+                pointer-events: none;
+            `;
+            document.body.appendChild(container);
+            addToastAnimationStyles();
+        }
+        
+        const toast = document.createElement('div');
+        const colors = {
+            success: '#198754',
+            error: '#dc3545',
+            danger: '#dc3545',
+            warning: '#ffc107',
+            info: '#0dcaf0',
+            primary: '#0d6efd'
+        };
+        
+        const textColors = { 
+            warning: '#000',
+            info: '#000'
+        };
+        
+        toast.style.cssText = `
+            background-color: ${colors[type] || colors.info};
+            color: ${textColors[type] || '#fff'};
+            padding: 12px 20px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            animation: slideIn 0.3s ease-out;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1.5;
+            max-width: 350px;
+            word-wrap: break-word;
+            pointer-events: auto;
+        `;
+        
+        toast.innerHTML = `${getToastIcon(type)} ${escapeHtml(message)}`;
+        toast.onclick = () => removeToast(toast);
+        
+        container.appendChild(toast);
+        
+        const delay = type === 'error' || type === 'danger' ? 5000 : 3000;
+        setTimeout(() => removeToast(toast), delay);
+        
+    } catch (error) {
+        console.error('Simple toast failed:', error);
+        console.log(`[${type.toUpperCase()}] ${message}`);
+    }
+}
+
+/**
+ * Remove toast with animation
+ */
+function removeToast(toast) {
+    if (!toast || !toast.parentElement) return;
+    
+    try {
+        toast.style.animation = 'slideOut 0.3s ease-out';
+        setTimeout(() => {
+            if (toast && toast.parentElement) {
+                toast.remove();
+            }
+        }, 300);
+    } catch (error) {
+        console.error('Toast removal failed:', error);
+    }
+}
+
+/**
+ * Add toast animation styles to document
+ */
+function addToastAnimationStyles() {
+    if (document.getElementById('toastAnimationStyles')) return;
+    
+    try {
+        const style = document.createElement('style');
+        style.id = 'toastAnimationStyles';
+        style.textContent = `
+            @keyframes slideIn {
+                from { transform: translateX(400px); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+            @keyframes slideOut {
+                from { transform: translateX(0); opacity: 1; }
+                to { transform: translateX(400px); opacity: 0; }
+            }
+        `;
+        
+        if (document.head) {
+            document.head.appendChild(style);
+        }
+    } catch (error) {
+        console.error('Failed to add toast styles:', error);
+    }
+}
+
+/**
+ * Get Bootstrap color class for toast type
+ */
+function getToastColorClass(type) {
+    const colors = {
+        'success': 'success',
+        'error': 'danger',
+        'danger': 'danger',
+        'warning': 'warning',
+        'info': 'info',
+        'primary': 'primary'
+    };
+    return colors[type] || 'info';
+}
+
+/**
+ * Get icon for toast type
+ */
+function getToastIcon(type) {
+    const icons = {
+        'success': '<i class="bi bi-check-circle-fill me-2"></i>',
+        'error': '<i class="bi bi-exclamation-circle-fill me-2"></i>',
+        'danger': '<i class="bi bi-exclamation-circle-fill me-2"></i>',
+        'warning': '<i class="bi bi-exclamation-triangle-fill me-2"></i>',
+        'info': '<i class="bi bi-info-circle-fill me-2"></i>',
+        'primary': '<i class="bi bi-bell-fill me-2"></i>'
+    };
+    return icons[type] || icons.info;
+}
+
+/**
+ * Escape HTML to prevent XSS
+ */
+function escapeHtml(text) {
+    if (text == null) return '';
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return String(text).replace(/[&<>"']/g, m => map[m]);
+}
+
+/**
+ * Safe toast wrapper (never throws errors)
+ */
+function safeShowToast(message, type = 'info') {
+    try {
+        showToast(message, type);
+    } catch (error) {
+        console.error('Toast completely failed:', error);
+        console.log(`[${type.toUpperCase()}] ${message}`);
+    }
+}
+
+// Alias for compatibility
+window.showToast = showToast;
 
 // ===================================
 // Tab Navigation
@@ -508,6 +759,161 @@ function getAllBanks() {
     const allBanks = [...new Set([...historyBanks, ...bankDatabase])];
     return allBanks.sort();
 }
+// =====================================================
+// SIMPLE BACKUP & EXPORT FUNCTIONS (No Duplicates)
+// =====================================================
+
+/**
+ * Create full backup of all data
+ * Note: Smart restore is in app.js
+ */
+function backupData() {
+    try {
+        // Use correct localStorage keys from app.js
+        const fd_records = localStorage.getItem('fd_records');
+        const fd_account_holders = localStorage.getItem('fd_account_holders');
+        const fd_templates = localStorage.getItem('fd_templates');
+        const fd_settings = localStorage.getItem('fd_settings');
+        const fd_calculations = localStorage.getItem('fd_calculations');
+        const fd_comparisons = localStorage.getItem('fd_comparisons');
+        const fd_pin = localStorage.getItem('fd_pin');
+
+        const backupObject = {
+            version: '4.0',
+            timestamp: new Date().toISOString(),
+            records: fd_records ? JSON.parse(CryptoJS.AES.decrypt(fd_records, fd_pin).toString(CryptoJS.enc.Utf8)) : [],
+            accountHolders: fd_account_holders ? JSON.parse(CryptoJS.AES.decrypt(fd_account_holders, fd_pin).toString(CryptoJS.enc.Utf8)) : [],
+            templates: fd_templates ? JSON.parse(CryptoJS.AES.decrypt(fd_templates, fd_pin).toString(CryptoJS.enc.Utf8)) : [],
+            settings: fd_settings ? JSON.parse(fd_settings) : {},
+            calculations: fd_calculations ? JSON.parse(CryptoJS.AES.decrypt(fd_calculations, fd_pin).toString(CryptoJS.enc.Utf8)) : [],
+            comparisons: fd_comparisons ? JSON.parse(CryptoJS.AES.decrypt(fd_comparisons, fd_pin).toString(CryptoJS.enc.Utf8)) : []
+        };
+
+        const dataStr = JSON.stringify(backupObject, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        
+        const url = URL.createObjectURL(dataBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        link.download = `FD-Manager-Backup-${timestamp}.json`;
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        showToast('✅ Backup downloaded successfully!', 'success');
+        console.log('[FD Manager] Backup created successfully');
+    } catch (error) {
+        console.error('[FD Manager] Backup error:', error);
+        showToast('❌ Error creating backup: ' + error.message, 'danger');
+    }
+}
+
+/**
+ /**
+ * Export all FD records to CSV
+ * Headers match import format for seamless re-import
+ */
+function exportAllToCSV() {
+    try {
+        console.log('[FD Manager] Starting CSV export...');
+        
+        let records = [];
+        
+        // Try using getData() from app.js first
+        if (typeof getData === 'function') {
+            records = getData('fd_records') || [];
+            console.log(`[FD Manager] Loaded ${records.length} records using getData()`);
+        } else {
+            // Fallback: manual decryption
+            const encryptedData = localStorage.getItem('fd_records');
+            const userPIN = localStorage.getItem('fd_pin');
+            
+            if (!encryptedData || !userPIN) {
+                showToast('⚠️ No FD records found to export', 'warning');
+                return;
+            }
+            
+            try {
+                const decryptedData = CryptoJS.AES.decrypt(encryptedData, userPIN).toString(CryptoJS.enc.Utf8);
+                records = JSON.parse(decryptedData);
+                console.log(`[FD Manager] Decrypted ${records.length} records`);
+            } catch (decryptError) {
+                console.error('[FD Manager] Decryption failed:', decryptError);
+                showToast('❌ Error: Unable to decrypt data', 'danger');
+                return;
+            }
+        }
+        
+        // Validate records
+        if (!Array.isArray(records) || records.length === 0) {
+            showToast('⚠️ No records available to export', 'warning');
+            return;
+        }
+
+        // Build CSV content with headers matching import format
+        let csv = '\uFEFF'; // UTF-8 BOM for Excel
+        
+        // Headers - MUST MATCH import parser expectations
+        csv += 'accountHolder,bank,amount,duration,unit,rate,startDate,maturityDate,certificateStatus,notes\n';
+        
+        // Data rows
+        records.forEach(r => {
+            const row = [
+                csvEscape(r.accountHolder),
+                csvEscape(r.bank),
+                r.amount || 0,
+                r.duration || '',
+                r.durationUnit || r.unit || 'Months',
+                r.rate || 0,
+                r.startDate || '',
+                r.maturityDate || '',
+                csvEscape(r.certificateStatus || 'Not Obtained'),
+                csvEscape(r.notes || '')
+            ];
+            csv += row.join(',') + '\n';
+        });
+
+        // Download file
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        
+        link.setAttribute('href', url);
+        link.setAttribute('download', `FD-Records-${new Date().toISOString().slice(0,10)}.csv`);
+        link.style.visibility = 'hidden';
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        URL.revokeObjectURL(url);
+
+        showToast(`✅ Successfully exported ${records.length} records to CSV!`, 'success');
+        console.log(`[FD Manager] CSV export successful: ${records.length} records`);
+        
+    } catch (error) {
+        console.error('[FD Manager] CSV export error:', error);
+        showToast('❌ Export failed: ' + error.message, 'danger');
+    }
+}
+
+/**
+ * Helper to escape CSV values
+ */
+function csvEscape(val) {
+    if (!val) return '';
+    const str = String(val);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+}
+
+console.log('[FD Manager] Backup & Export functions loaded (Import/Restore in app.js)');
 
 // ===================================
 // Initialize
