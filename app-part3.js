@@ -228,6 +228,42 @@ function toggleCalcDateRange() {
 }
 
 /**
+ * Toggle manual date range
+ */
+function toggleManualDateRange() {
+    const checked = document.getElementById('calcManualDateRange').checked;
+    const durationDiv = document.getElementById('calcManualDateRangeDiv');
+    const durationInput = document.getElementById('calcDuration').parentElement.parentElement;
+    
+    if (checked) {
+        durationDiv.style.display = 'block';
+        durationInput.style.display = 'none';
+        
+        // Set default dates if empty
+        const startInput = document.getElementById('calcManualStartDate');
+        const endInput = document.getElementById('calcManualEndDate');
+        if (!startInput.value) {
+            const today = new Date().toISOString().split('T')[0];
+            startInput.value = today;
+            const tenDaysLater = new Date();
+            tenDaysLater.setDate(tenDaysLater.getDate() + 10);
+            endInput.value = tenDaysLater.toISOString().split('T')[0];
+        }
+    } else {
+        durationDiv.style.display = 'none';
+        durationInput.style.display = 'block';
+    }
+}
+
+/**
+ * Check if date string is valid
+ */
+function isValidDate(dateString) {
+    const date = new Date(dateString);
+    return date instanceof Date && !isNaN(date);
+}
+
+/**
  * Calculate duration from custom dates
  */
 function calculateDurationFromDates(fromDate, toDate) {
@@ -249,15 +285,65 @@ function performCalculation() {
     principal = parseFloat(document.getElementById('calcPrincipal').value);
     rate = parseFloat(document.getElementById('calcRate').value);
     
-    // Check for custom date range
-    const useCustomRange = mode === 'existing' && document.getElementById('calcCustomDateRange')?.checked;
+    // Check for date range input
+    const useDateRange = (mode === 'existing' && document.getElementById('calcCustomDateRange')?.checked) ||
+                         (mode === 'manual' && document.getElementById('calcManualDateRange')?.checked);
     
-    if (useCustomRange) {
-        const fromDate = document.getElementById('calcFromDate').value;
-        const toDate = document.getElementById('calcToDate').value;
+    let fromDate, toDate;
+    if (useDateRange) {
+        if (mode === 'existing') {
+            fromDate = document.getElementById('calcFromDate').value;
+            toDate = document.getElementById('calcToDate').value;
+            
+            if (!isValidDate(fromDate) || !isValidDate(toDate)) {
+                return;
+            }
+            
+            // Swap dates if from > to
+            if (new Date(fromDate) > new Date(toDate)) {
+                [fromDate, toDate] = [toDate, fromDate];
+                document.getElementById('calcFromDate').value = fromDate;
+                document.getElementById('calcToDate').value = toDate;
+            }
+            
+            // Cap dates to FD term
+            const fdId = document.getElementById('calcFDSelect').value;
+            const records = getData('fd_records') || [];
+            const record = records.find(r => r.id === fdId);
+            if (record) {
+                const maturityDate = calculateMaturityDate(record.startDate, record.duration, record.durationUnit);
+                const fdStart = new Date(record.startDate);
+                const fdEnd = new Date(maturityDate);
+                const customFrom = new Date(fromDate);
+                const customTo = new Date(toDate);
+                
+                if (customFrom < fdStart) {
+                    fromDate = record.startDate;
+                    document.getElementById('calcFromDate').value = fromDate;
+                }
+                if (customTo > fdEnd) {
+                    toDate = maturityDate;
+                    document.getElementById('calcToDate').value = toDate;
+                }
+            }
+        } else { // manual
+            fromDate = document.getElementById('calcManualStartDate').value;
+            toDate = document.getElementById('calcManualEndDate').value;
+            
+            if (!isValidDate(fromDate) || !isValidDate(toDate)) {
+                return;
+            }
+            
+            // Swap dates if from > to
+            if (new Date(fromDate) > new Date(toDate)) {
+                [fromDate, toDate] = [toDate, fromDate];
+                document.getElementById('calcManualStartDate').value = fromDate;
+                document.getElementById('calcManualEndDate').value = toDate;
+            }
+        }
         
         if (!fromDate || !toDate) {
-            showToast('Please select both From and To dates', 'error');
+            showToast('Please select both start and end dates', 'error');
             return;
         }
         
@@ -270,6 +356,26 @@ function performCalculation() {
     }
     
     const frequency = parseInt(document.getElementById('calcFrequency').value);
+    
+    // Adjust principal for existing FD if fromDate is after startDate
+    if (useDateRange && mode === 'existing') {
+        const fdId = document.getElementById('calcFDSelect').value;
+        const records = getData('fd_records') || [];
+        const record = records.find(r => r.id === fdId);
+        
+        if (record && record.startDate && fromDate) {
+            const startDate = new Date(record.startDate);
+            const customFromDate = new Date(fromDate);
+            
+            if (customFromDate > startDate) {
+                // Calculate maturity amount at fromDate
+                const daysToFrom = calculateDurationFromDates(record.startDate, fromDate);
+                const monthsToFrom = (daysToFrom / 365) * 12; // More accurate
+                const maturityAtFrom = record.amount + calculateCompoundInterest(record.amount, record.rate, monthsToFrom, frequency);
+                principal = maturityAtFrom;
+            }
+        }
+    }
     
     // Validation
     if (!principal || principal <= 0) {
@@ -290,7 +396,7 @@ function performCalculation() {
     // Calculate in months
     let months;
     if (unit === 'Days') {
-        months = durationValue / 30; // Approximate
+        months = (durationValue / 365) * 12; // More accurate calculation
     } else if (unit === 'Years') {
         months = durationValue * 12;
     } else {
