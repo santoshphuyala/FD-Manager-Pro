@@ -4,6 +4,9 @@
 // Nepal Edition - Version 4.0
 // ===================================
 
+// Global variables for principal choice modal
+let pendingCalculation = null;
+
 // ===================================
 // Chart Management Helpers
 // ===================================
@@ -223,6 +226,11 @@ let interestComparisonChart = null;
  */
 function toggleCalcMode() {
     try {
+        if (!pinHash) {
+            showToast('Please log in first', 'error');
+            return;
+        }
+        
         const mode = document.getElementById('calcMode')?.value;
         
         if (mode === 'existing') {
@@ -252,6 +260,7 @@ function loadAccountHoldersForCalc() {
     try {
         if (!pinHash) {
             console.warn('Cannot load account holders: PIN not initialized');
+            showToast('Please log in first', 'error');
             return;
         }
         
@@ -267,8 +276,13 @@ function loadAccountHoldersForCalc() {
             option.textContent = holder;
             select.appendChild(option);
         });
+        
+        if (holders.length === 0) {
+            showToast('No account holders found. Please add some FDs first or load sample data.', 'warning');
+        }
     } catch (error) {
         console.error('Load account holders for calc error:', error);
+        showToast('Error loading account holders', 'error');
     }
 }
 
@@ -300,8 +314,13 @@ function loadFDsForCalc() {
             option.textContent = `${r.bank} - ${formatCurrency(r.amount)} @ ${r.rate}% (${r.duration} ${r.durationUnit})`;
             select.appendChild(option);
         });
+        
+        if (records.length === 0) {
+            showToast('No FDs found for ' + holder + '. Please add some FDs first.', 'warning');
+        }
     } catch (error) {
         console.error('Load FDs for calc error:', error);
+        showToast('Error loading FDs', 'error');
     }
 }
 
@@ -521,86 +540,25 @@ function performCalculation() {
                     const daysToFrom = calculateDurationFromDates(record.startDate, fromDate);
                     const monthsToFrom = (daysToFrom / 365) * 12; // More accurate
                     const maturityAtFrom = record.amount + calculateCompoundInterest(record.amount, record.rate, monthsToFrom, frequency);
-                    principal = maturityAtFrom;
+                    
+                    // Show modal to choose principal
+                    const calculationParams = {
+                        mode, principal: record.amount, rate, durationValue, unit, frequency, fromDate, toDate, useDateRange,
+                        originalPrincipal: record.amount,
+                        compoundedPrincipal: maturityAtFrom
+                    };
+                    
+                    showPrincipalChoiceModal(record.amount, maturityAtFrom, calculationParams);
+                    return; // Wait for user choice
                 }
             }
         }
         
-        // Enhanced validation
-        if (!isValidAmount(principal)) {
-            showToast('Please enter valid principal amount', 'error');
-            return;
-        }
-        
-        if (!isValidRate(rate)) {
-            showToast('Please enter valid interest rate (0-100%)', 'error');
-            return;
-        }
-        
-        if (!durationValue || durationValue <= 0) {
-            showToast('Please enter valid duration', 'error');
-            return;
-        }
-        
-        // Calculate in months
-        let months;
-        if (unit === 'Days') {
-            months = (durationValue / 365) * 12; // More accurate calculation
-        } else if (unit === 'Years') {
-            months = durationValue * 12;
-        } else {
-            months = durationValue;
-        }
-        
-        if (months <= 0) {
-            showToast('Invalid duration calculation', 'error');
-            return;
-        }
-        
-        // Calculate interest
-        const simpleInterest = calculateSimpleInterest(principal, rate, months);
-        const compoundInterest = calculateCompoundInterest(principal, rate, months, frequency);
-        const maturityAmount = principal + compoundInterest;
-        const difference = compoundInterest - simpleInterest;
-        
-        // Get frequency name
-        const frequencyNames = {
-            '4': 'Quarterly (4/year)',
-            '12': 'Monthly (12/year)',
-            '1': 'Annually (1/year)',
-            '365': 'Daily (365/year)',
-            '0': 'At Maturity (Simple)'
+        // Proceed with calculation
+        const calculationParams = {
+            principal, rate, durationValue, unit, frequency
         };
-        
-        // Display results safely
-        const resultFields = {
-            'resultPrincipal': formatCurrency(principal),
-            'resultRate': rate + '% p.a.',
-            'resultDuration': `${durationValue} ${unit}`,
-            'resultFrequency': frequencyNames[frequency] || 'Unknown',
-            'resultSimple': formatCurrency(simpleInterest),
-            'resultCompound': formatCurrency(compoundInterest),
-            'resultMaturity': formatCurrency(maturityAmount),
-            'resultDifference': formatCurrency(difference)
-        };
-        
-        Object.keys(resultFields).forEach(fieldId => {
-            const element = document.getElementById(fieldId);
-            if (element) element.textContent = resultFields[fieldId];
-        });
-        
-        // Show/hide result sections
-        const resultsEl = document.getElementById('calcResults');
-        const noResultsEl = document.getElementById('noCalcResults');
-        
-        if (resultsEl) resultsEl.style.display = 'block';
-        if (noResultsEl) noResultsEl.style.display = 'none';
-        
-        // Show comparison chart
-        showInterestComparison(principal, simpleInterest, compoundInterest);
-        
-        // Success message
-        showToast('Calculation completed successfully!', 'success');
+        completeCalculation(calculationParams);
         
     } catch (error) {
         console.error('Calculation error:', error);
@@ -791,21 +749,24 @@ function saveCalculationToHistory() {
             principal: document.getElementById('resultPrincipal')?.textContent,
             rate: document.getElementById('resultRate')?.textContent,
             duration: document.getElementById('resultDuration')?.textContent,
+            frequency: document.getElementById('resultFrequency')?.textContent,
+            simpleInterest: document.getElementById('resultSimple')?.textContent,
             compoundInterest: document.getElementById('resultCompound')?.textContent,
-            maturityAmount: document.getElementById('resultMaturity')?.textContent
+            maturityAmount: document.getElementById('resultMaturity')?.textContent,
+            difference: document.getElementById('resultDifference')?.textContent
         };
-        
+
         let history = JSON.parse(localStorage.getItem('calc_history') || '[]');
         history.unshift(calculation); // Add to beginning
-        
-        // Keep only last 10
-        if (history.length > 10) {
-            history = history.slice(0, 10);
+
+        // Keep only last 50 calculations (increased from 10)
+        if (history.length > 50) {
+            history = history.slice(0, 50);
         }
-        
+
         localStorage.setItem('calc_history', JSON.stringify(history));
         displayCalculationHistory();
-        
+
         showToast('Calculation saved to history', 'success');
     } catch (error) {
         console.error('Save calculation to history error:', error);
@@ -819,47 +780,203 @@ function saveCalculationToHistory() {
 function displayCalculationHistory() {
     try {
         const history = JSON.parse(localStorage.getItem('calc_history') || '[]');
-        const container = document.getElementById('calculationHistory');
-        
-        if (!container) return;
-        
+        const tbody = document.getElementById('calculationHistory');
+        const countEl = document.getElementById('calcCount');
+
+        if (!tbody) return;
+
         if (history.length === 0) {
-            container.innerHTML = '<p class="text-muted small">No saved calculations</p>';
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center text-muted py-4">
+                        <i class="bi bi-info-circle"></i> No saved calculations
+                    </td>
+                </tr>
+            `;
+            if (countEl) countEl.textContent = '0 calculations';
             return;
         }
-        
-        container.innerHTML = history.map(calc => `
-            <div class="card mb-2">
-                <div class="card-body p-2">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <div class="small">
-                            <strong>${calc.principal}</strong> @ ${calc.rate} for ${calc.duration}<br>
-                            <span class="text-success"><strong>Interest:</strong> ${calc.compoundInterest}</span><br>
-                            <small class="text-muted">${formatDate(calc.timestamp)}</small>
-                        </div>
-                        <button class="btn btn-sm btn-outline-danger" onclick="deleteCalculationHistory('${calc.id}')">
+
+        tbody.innerHTML = history.map(calc => `
+            <tr data-calc-id="${calc.id}">
+                <td>
+                    <small class="text-muted">${formatDate(calc.timestamp)}</small>
+                </td>
+                <td>
+                    <strong>${calc.principal || 'N/A'}</strong>
+                </td>
+                <td>${calc.rate || 'N/A'}</td>
+                <td>${calc.duration || 'N/A'}</td>
+                <td class="text-success">
+                    <strong>${calc.compoundInterest || 'N/A'}</strong>
+                </td>
+                <td class="text-primary">
+                    <strong>${calc.maturityAmount || 'N/A'}</strong>
+                </td>
+                <td>
+                    <div class="btn-group" role="group">
+                        <button class="btn btn-sm btn-outline-primary" onclick="editCalculation('${calc.id}')" title="Edit">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-info" onclick="duplicateCalculation('${calc.id}')" title="Duplicate">
+                            <i class="bi bi-copy"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteCalculationHistory('${calc.id}')" title="Delete">
                             <i class="bi bi-trash"></i>
                         </button>
                     </div>
-                </div>
-            </div>
+                </td>
+            </tr>
         `).join('');
+
+        if (countEl) countEl.textContent = `${history.length} calculation${history.length !== 1 ? 's' : ''}`;
+
+        // Apply current filter
+        filterCalculations();
     } catch (error) {
         console.error('Display calculation history error:', error);
     }
 }
 
 /**
- * Delete calculation from history
+ * Edit calculation
  */
-function deleteCalculationHistory(id) {
+function editCalculation(id) {
     try {
-        let history = JSON.parse(localStorage.getItem('calc_history') || '[]');
-        history = history.filter(c => c.id !== id);
+        const history = JSON.parse(localStorage.getItem('calc_history') || '[]');
+        const calc = history.find(c => c.id === id);
+
+        if (!calc) {
+            showToast('Calculation not found', 'error');
+            return;
+        }
+
+        // Populate the calculator form with the saved calculation data
+        // Extract values from the saved strings
+        const principal = calc.principal ? calc.principal.replace(/[^\d.]/g, '') : '';
+        const rate = calc.rate ? calc.rate.replace(/[^\d.]/g, '') : '';
+        const duration = calc.duration ? calc.duration.split(' ')[0] : '';
+
+        // Set form values
+        if (document.getElementById('calcPrincipal')) document.getElementById('calcPrincipal').value = principal;
+        if (document.getElementById('calcRate')) document.getElementById('calcRate').value = rate;
+        if (document.getElementById('calcDuration')) document.getElementById('calcDuration').value = duration;
+
+        // Switch to manual mode for editing
+        if (document.getElementById('calcMode')) document.getElementById('calcMode').value = 'manual';
+        toggleCalcMode();
+
+        showToast('Calculation loaded for editing', 'success');
+
+        // Scroll to calculator
+        document.getElementById('calculator-tab')?.click();
+        document.querySelector('#calculator')?.scrollIntoView({ behavior: 'smooth' });
+
+    } catch (error) {
+        console.error('Edit calculation error:', error);
+        showToast('Error editing calculation', 'error');
+    }
+}
+
+/**
+ * Duplicate calculation
+ */
+function duplicateCalculation(id) {
+    try {
+        const history = JSON.parse(localStorage.getItem('calc_history') || '[]');
+        const calc = history.find(c => c.id === id);
+
+        if (!calc) {
+            showToast('Calculation not found', 'error');
+            return;
+        }
+
+        // Create a duplicate with new ID and timestamp
+        const duplicate = {
+            ...calc,
+            id: generateId(),
+            timestamp: new Date().toISOString()
+        };
+
+        history.unshift(duplicate);
         localStorage.setItem('calc_history', JSON.stringify(history));
         displayCalculationHistory();
+
+        showToast('Calculation duplicated', 'success');
     } catch (error) {
-        console.error('Delete calculation history error:', error);
+        console.error('Duplicate calculation error:', error);
+        showToast('Error duplicating calculation', 'error');
+    }
+}
+
+/**
+ * Export calculations to Excel
+ */
+function exportCalculationsToExcel() {
+    try {
+        const history = JSON.parse(localStorage.getItem('calc_history') || '[]');
+
+        if (history.length === 0) {
+            showToast('No calculations to export', 'warning');
+            return;
+        }
+
+        // Prepare data for Excel
+        const data = history.map(calc => ({
+            'Date': formatDate(calc.timestamp),
+            'Principal': calc.principal || '',
+            'Rate': calc.rate || '',
+            'Duration': calc.duration || '',
+            'Interest': calc.compoundInterest || '',
+            'Maturity Amount': calc.maturityAmount || '',
+            'Simple Interest': calc.simpleInterest || '',
+            'Difference': calc.difference || ''
+        }));
+
+        // Create worksheet
+        const ws = XLSX.utils.json_to_sheet(data);
+
+        // Create workbook
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Calculations');
+
+        // Generate filename with current date
+        const filename = `FD_Calculations_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+        // Save file
+        XLSX.writeFile(wb, filename);
+
+        showToast(`Exported ${history.length} calculations to Excel`, 'success');
+    } catch (error) {
+        console.error('Export to Excel error:', error);
+        showToast('Error exporting to Excel', 'error');
+    }
+}
+
+/**
+ * Filter calculations based on search input
+ */
+function filterCalculations() {
+    try {
+        const searchTerm = document.getElementById('calcSearch')?.value?.toLowerCase() || '';
+        const rows = document.querySelectorAll('#calculationHistory tr[data-calc-id]');
+        let visibleCount = 0;
+
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            const isVisible = text.includes(searchTerm);
+            row.style.display = isVisible ? '' : 'none';
+            if (isVisible) visibleCount++;
+        });
+
+        // Update count if search is active
+        const countEl = document.getElementById('calcCount');
+        if (searchTerm && countEl) {
+            const total = rows.length;
+            countEl.textContent = `Showing ${visibleCount} of ${total} calculation${total !== 1 ? 's' : ''}`;
+        }
+    } catch (error) {
+        console.error('Filter calculations error:', error);
     }
 }
 
@@ -868,13 +985,20 @@ function deleteCalculationHistory(id) {
  */
 function clearCalculationHistory() {
     try {
-        if (!confirm('Clear all calculation history?')) return;
-        
+        const history = JSON.parse(localStorage.getItem('calc_history') || '[]');
+        if (history.length === 0) {
+            showToast('No calculations to clear', 'info');
+            return;
+        }
+
+        if (!confirm(`Clear all ${history.length} calculation records?`)) return;
+
         localStorage.setItem('calc_history', '[]');
         displayCalculationHistory();
-        showToast('History cleared', 'success');
+        showToast('All calculations cleared', 'success');
     } catch (error) {
         console.error('Clear calculation history error:', error);
+        showToast('Error clearing calculations', 'error');
     }
 }
 
@@ -2047,3 +2171,123 @@ document.addEventListener('DOMContentLoaded', function() {
 
 console.log('[FD Manager Nepal] Import functions loaded - ADD ONLY mode available');
 console.log('[FD Manager Nepal] App-part3.js loaded successfully');
+
+// ===================================
+// Principal Choice Modal Functions
+// ===================================
+
+function showPrincipalChoiceModal(originalPrincipal, compoundedPrincipal, calculationParams) {
+    const modal = new bootstrap.Modal(document.getElementById('principalChoiceModal'));
+    
+    document.getElementById('originalPrincipalDisplay').textContent = formatCurrency(originalPrincipal);
+    document.getElementById('compoundedPrincipalDisplay').textContent = formatCurrency(compoundedPrincipal);
+    
+    pendingCalculation = calculationParams;
+    
+    modal.show();
+}
+
+function useOriginalPrincipal() {
+    if (pendingCalculation) {
+        pendingCalculation.principal = pendingCalculation.originalPrincipal;
+        completeCalculation(pendingCalculation);
+        pendingCalculation = null;
+    }
+}
+
+function useCompoundedPrincipal() {
+    if (pendingCalculation) {
+        pendingCalculation.principal = pendingCalculation.compoundedPrincipal;
+        completeCalculation(pendingCalculation);
+        pendingCalculation = null;
+    }
+}
+
+function completeCalculation(params) {
+    const { principal, rate, durationValue, unit, frequency } = params;
+    
+    try {
+        // Enhanced validation
+        if (!isValidAmount(principal)) {
+            showToast('Please enter valid principal amount', 'error');
+            return;
+        }
+        
+        if (!isValidRate(rate)) {
+            showToast('Please enter valid interest rate (0-100%)', 'error');
+            return;
+        }
+        
+        if (!durationValue || durationValue <= 0) {
+            showToast('Please enter valid duration', 'error');
+            return;
+        }
+        
+        // Calculate in months
+        let months;
+        if (unit === 'Days') {
+            months = (durationValue / 365) * 12; // More accurate calculation
+        } else if (unit === 'Years') {
+            months = durationValue * 12;
+        } else {
+            months = durationValue;
+        }
+        
+        if (months <= 0) {
+            showToast('Invalid duration calculation', 'error');
+            return;
+        }
+        
+        // Calculate interest
+        const simpleInterest = calculateSimpleInterest(principal, rate, months);
+        const compoundInterest = calculateCompoundInterest(principal, rate, months, frequency);
+        const maturityAmount = principal + compoundInterest;
+        const difference = compoundInterest - simpleInterest;
+        
+        // Get frequency name
+        const frequencyNames = {
+            '4': 'Quarterly (4/year)',
+            '12': 'Monthly (12/year)',
+            '1': 'Annually (1/year)',
+            '365': 'Daily (365/year)',
+            '0': 'At Maturity (Simple)'
+        };
+        
+        // Display results safely
+        const resultFields = {
+            'resultPrincipal': formatCurrency(principal),
+            'resultRate': rate + '% p.a.',
+            'resultDuration': `${durationValue} ${unit}`,
+            'resultFrequency': frequencyNames[frequency] || 'Unknown',
+            'resultSimple': formatCurrency(simpleInterest),
+            'resultCompound': formatCurrency(compoundInterest),
+            'resultMaturity': formatCurrency(maturityAmount),
+            'resultDifference': formatCurrency(difference)
+        };
+        
+        Object.keys(resultFields).forEach(fieldId => {
+            const element = document.getElementById(fieldId);
+            if (element) element.textContent = resultFields[fieldId];
+        });
+        
+        // Show/hide result sections
+        const resultsEl = document.getElementById('calcResults');
+        const noResultsEl = document.getElementById('noCalcResults');
+        
+        if (resultsEl) resultsEl.style.display = 'block';
+        if (noResultsEl) noResultsEl.style.display = 'none';
+        
+        // Show comparison chart
+        showInterestComparison(principal, simpleInterest, compoundInterest);
+        
+        // Success message
+        showToast('Calculation completed successfully!', 'success');
+        
+    }
+    catch (error) {
+        console.error('Calculation error:', error);
+        showToast('Error performing calculation: ' + error.message, 'error');
+    }
+}
+
+// End of app-part3.js

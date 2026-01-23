@@ -145,7 +145,7 @@ function initializeApp() {
         loadFDRecords();
         loadTemplates();
         updateDashboard();
-        updateAnalytics();
+        if (typeof updateAnalytics === 'function') updateAnalytics();
         populateSettings();
         
         // Load certificates if function exists
