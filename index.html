@@ -39,7 +39,7 @@
                 <div class="mb-3">
                     <label for="loginPin" class="form-label">Enter 4-Digit PIN</label>
                     <input type="password" class="form-control pin-input" id="loginPin" 
-                           maxlength="4" pattern="[0-9]{4}" placeholder="****" autocomplete="off">
+                           maxlength="4" pattern="[0-9]{4}" placeholder="****" autocomplete="off" name="pin">
                 </div>
                 <button onclick="login()" class="btn btn-primary w-100">
                     <i class="bi bi-unlock-fill"></i> Login
@@ -57,12 +57,12 @@
                 <div class="mb-3">
                     <label for="setupPin" class="form-label">Create 4-Digit PIN</label>
                     <input type="password" class="form-control pin-input" id="setupPin" 
-                           maxlength="4" pattern="[0-9]{4}" placeholder="****">
+                           maxlength="4" pattern="[0-9]{4}" placeholder="****" name="pin">
                 </div>
                 <div class="mb-3">
                     <label for="confirmPin" class="form-label">Confirm PIN</label>
                     <input type="password" class="form-control pin-input" id="confirmPin" 
-                           maxlength="4" pattern="[0-9]{4}" placeholder="****">
+                           maxlength="4" pattern="[0-9]{4}" placeholder="****" name="confirmPin">
                 </div>
                 <button onclick="setupPin()" class="btn btn-success w-100">
                     <i class="bi bi-check-circle-fill"></i> Create PIN
@@ -294,7 +294,7 @@
                 </div>
             </div>
             <div class="card-body">
-                <form id="fdForm" onsubmit="saveFD(event)">
+                <form id="fdForm" onsubmit="saveFD(event)" novalidate>
                     
                     <!-- Section 1: Basic Information -->
                     <div class="form-section">
@@ -305,7 +305,7 @@
                             <div class="col-md-6 mb-3">
                                 <label class="form-label">Account Holder *</label>
                                 <div class="input-group">
-                                    <select class="form-select" id="fdAccountHolder" required onchange="loadRecentFDForHolder()">
+                                    <select class="form-select" id="fdAccountHolder" required onchange="loadRecentFDForHolder()" name="accountHolder">
                                         <option value="">Select Account Holder</option>
                                     </select>
                                     <button class="btn btn-outline-secondary" type="button" onclick="quickAddHolder()" title="Add New Holder">
@@ -318,7 +318,7 @@
                                 <div class="input-group">
                                     <input type="text" class="form-control" id="fdBank" 
                                            list="bankSuggestions" required autocomplete="off"
-                                           onchange="suggestBankRate()" oninput="saveDraft()">
+                                           onchange="suggestBankRate()" oninput="saveDraft()" name="bank">
                                     <datalist id="bankSuggestions"></datalist>
                                     <button class="btn btn-outline-info" type="button" onclick="showBankRateHelper()" title="Check Rates">
                                         <i class="bi bi-graph-up"></i>
@@ -340,7 +340,7 @@
                                 <input type="number" class="form-control form-control-lg" id="fdAmount" 
                                        min="1000" step="1000" required 
                                        oninput="updateInterestPreview(); validateAmount(); saveDraft()"
-                                       placeholder="e.g., 100000">
+                                       placeholder="e.g., 100000" name="amount">
                                 <small class="text-muted" id="amountInWords"></small>
                             </div>
                             <div class="col-md-4 mb-3">
@@ -349,7 +349,7 @@
                                     <input type="number" class="form-control form-control-lg" id="fdRate" 
                                            min="0" max="20" step="0.01" required 
                                            oninput="updateInterestPreview(); saveDraft()"
-                                           placeholder="e.g., 9.5">
+                                           placeholder="e.g., 9.5" name="rate">
                                     <span class="input-group-text">%</span>
                                 </div>
                                 <small class="text-success" id="rateComparison"></small>
@@ -357,7 +357,7 @@
                             <div class="col-md-4 mb-3">
                                 <label class="form-label">Start Date *</label>
                                 <input type="date" class="form-control" id="fdStartDate" required
-                                       onchange="autoCalculateMaturity(); saveDraft()">
+                                       onchange="autoCalculateMaturity(); saveDraft()" name="startDate">
                                 <div class="form-check mt-2">
                                     <input class="form-check-input" type="checkbox" id="useTodayDate" onchange="setTodayDate()">
                                     <label class="form-check-label small" for="useTodayDate">
@@ -373,12 +373,12 @@
                                 <input type="number" class="form-control" id="fdDuration" 
                                        min="1" step="1" required 
                                        oninput="updateInterestPreview(); autoCalculateMaturity(); saveDraft()"
-                                       placeholder="e.g., 12">
+                                       placeholder="e.g., 12" name="duration">
                             </div>
                             <div class="col-md-4 mb-3">
                                 <label class="form-label">Duration Unit *</label>
                                 <select class="form-select" id="fdDurationUnit" 
-                                        onchange="toggleCustomMaturity(); autoCalculateMaturity(); saveDraft()" required>
+                                        onchange="toggleCustomMaturity(); autoCalculateMaturity(); saveDraft()" required name="durationUnit">
                                     <option value="Months">Months</option>
                                     <option value="Years">Years</option>
                                     <option value="Days">Days</option>
@@ -641,29 +641,29 @@
             </div>
             <div class="modal-body">
                 <p class="text-muted">Fill only essential fields. Other details can be added later.</p>
-                <form id="quickAddForm" onsubmit="saveQuickFD(event)">
+                <form id="quickAddForm" onsubmit="saveQuickFD(event)" novalidate>
                     <div class="mb-3">
                         <label class="form-label">Account Holder *</label>
-                        <select class="form-select" id="quickHolder" required>
+                        <select class="form-select" id="quickHolder" required name="accountHolder">
                             <option value="">Select Holder</option>
                         </select>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Bank *</label>
-                        <input type="text" class="form-control" id="quickBank" list="bankSuggestions" required>
+                        <input type="text" class="form-control" id="quickBank" list="bankSuggestions" required name="bank">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Amount (NRs) *</label>
-                        <input type="number" class="form-control" id="quickAmount" required min="1000">
+                        <input type="number" class="form-control" id="quickAmount" required min="1000" name="amount">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Rate (%) *</label>
-                        <input type="number" class="form-control" id="quickRate" required step="0.01">
+                        <input type="number" class="form-control" id="quickRate" required step="0.01" name="rate">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Duration *</label>
                         <div class="input-group">
-                            <input type="number" class="form-control" id="quickDuration" required>
+                            <input type="number" class="form-control" id="quickDuration" required name="duration">
                             <select class="form-select" id="quickUnit" style="max-width: 120px;">
                                 <option value="Months">Months</option>
                                 <option value="Years">Years</option>
@@ -814,25 +814,25 @@
                             <div class="card mb-3">
                                 <div class="card-header">Create New Template</div>
                                 <div class="card-body">
-                                    <form onsubmit="saveTemplate(event)">
+                                    <form onsubmit="saveTemplate(event)" novalidate>
                                         <div class="mb-3">
                                             <label class="form-label">Template Name *</label>
                                             <input type="text" class="form-control" id="templateName" 
-                                                   placeholder="e.g., Nabil 1-Year Regular" required>
+                                                   placeholder="e.g., Nabil 1-Year Regular" required name="templateName">
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Bank Name *</label>
-                                            <input type="text" class="form-control" id="templateBank" required>
+                                            <input type="text" class="form-control" id="templateBank" required name="bank">
                                         </div>
                                         <div class="row">
                                             <div class="col-6 mb-3">
                                                 <label class="form-label">Duration *</label>
                                                 <input type="number" class="form-control" id="templateDuration" 
-                                                       min="1" required>
+                                                       min="1" required name="duration">
                                             </div>
                                             <div class="col-6 mb-3">
                                                 <label class="form-label">Unit *</label>
-                                                <select class="form-select" id="templateUnit" required>
+                                                <select class="form-select" id="templateUnit" required name="unit">
                                                     <option value="Months">Months</option>
                                                     <option value="Years">Years</option>
                                                 </select>
@@ -841,7 +841,7 @@
                                         <div class="mb-3">
                                             <label class="form-label">Interest Rate (%) *</label>
                                             <input type="number" class="form-control" id="templateRate" 
-                                                   step="0.01" required>
+                                                   step="0.01" required name="rate">
                                         </div>
                                         <button type="submit" class="btn btn-primary">
                                             <i class="bi bi-save"></i> Save Template
@@ -1223,10 +1223,10 @@
                         <i class="bi bi-people-fill"></i> Account Holder Management
                     </div>
                     <div class="card-body">
-                        <form onsubmit="addAccountHolder(event)">
+                        <form onsubmit="addAccountHolder(event)" novalidate>
                             <div class="input-group mb-3">
                                 <input type="text" class="form-control" id="newAccountHolder" 
-                                       placeholder="Enter name" required>
+                                       placeholder="Enter name" required name="accountHolder">
                                 <button type="submit" class="btn btn-primary">
                                     <i class="bi bi-plus-circle"></i> Add
                                 </button>
