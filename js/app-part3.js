@@ -1,152 +1,247 @@
 // ===================================
-// FD Manager Pro - Application Part 3
+// FD Manager Pro - Application Part 3 (FIXED)
 // Analytics, Export, Backup, Calculator
 // Nepal Edition - Version 4.0
 // ===================================
 
 // ===================================
-// Analytics Functions
+// Chart Management Helpers
+// ===================================
+
+/**
+ * Safely destroy a chart instance
+ */
+function safeDestroyChart(chartInstance) {
+    try {
+        if (chartInstance && typeof chartInstance.destroy === 'function') {
+            chartInstance.destroy();
+        }
+    } catch (error) {
+        console.warn('Chart destruction warning:', error);
+    }
+    return null;
+}
+
+/**
+ * Initialize chart with error handling
+ */
+function safeCreateChart(ctx, config) {
+    try {
+        if (!ctx) {
+            console.error('Chart context is null');
+            return null;
+        }
+        
+        if (typeof Chart === 'undefined') {
+            console.error('Chart.js library not loaded');
+            showToast('Chart library not available', 'error');
+            return null;
+        }
+        
+        return new Chart(ctx, config);
+    } catch (error) {
+        console.error('Chart creation error:', error);
+        showToast('Error creating chart: ' + error.message, 'error');
+        return null;
+    }
+}
+
+// ===================================
+// Analytics Functions (FIXED)
 // ===================================
 
 function updateAnalytics() {
-    const records = getData('fd_records') || [];
-    
-    if (records.length === 0) {
-        const canvas = document.getElementById('analyticsChart');
-        if (canvas && analyticsChart) {
-            analyticsChart.destroy();
-            analyticsChart = null;
+    try {
+        // Check if PIN is initialized before getting data
+        if (!pinHash) {
+            console.warn('Cannot update analytics: PIN not initialized');
+            return;
         }
-        document.getElementById('bankAnalysisTable').innerHTML = 
-            '<tr><td colspan="5" class="text-center text-muted">No data available</td></tr>';
-        return;
-    }
-    
-    const bankGroups = groupBy(records, 'bank');
-    const bankStats = Object.keys(bankGroups).map(bank => {
-        const bankRecords = bankGroups[bank];
-        return {
-            bank: bank,
-            count: bankRecords.length,
-            totalInvestment: sumBy(bankRecords, 'amount'),
-            totalInterest: bankRecords.reduce((sum, r) => sum + calculateInterestForRecord(r), 0),
-            avgRate: averageBy(bankRecords, 'rate')
+        
+        const records = getData('fd_records') || [];
+        
+        if (records.length === 0) {
+            const canvas = document.getElementById('analyticsChart');
+            if (canvas && analyticsChart) {
+                analyticsChart = safeDestroyChart(analyticsChart);
+            }
+            
+            const tableBody = document.getElementById('bankAnalysisTable');
+            if (tableBody) {
+                tableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No data available</td></tr>';
+            }
+            return;
+        }
+        
+        const bankGroups = groupBy(records, 'bank');
+        const bankStats = Object.keys(bankGroups).map(bank => {
+            const bankRecords = bankGroups[bank];
+            return {
+                bank: bank,
+                count: bankRecords.length,
+                totalInvestment: sumBy(bankRecords, 'amount'),
+                totalInterest: bankRecords.reduce((sum, r) => sum + calculateInterestForRecord(r), 0),
+                avgRate: averageBy(bankRecords, 'rate')
+            };
+        });
+        
+        // Update summary cards safely
+        const updateElement = (id, value) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = value;
         };
-    });
-    
-    document.getElementById('analyticsTotalBanks').textContent = bankStats.length;
-    document.getElementById('analyticsTotalFDs').textContent = records.length;
-    document.getElementById('analyticsTotalInvestment').textContent = formatCurrency(sumBy(records, 'amount'));
-    document.getElementById('analyticsTotalInterest').textContent = formatCurrency(
-        records.reduce((sum, r) => sum + calculateInterestForRecord(r), 0)
-    );
-    document.getElementById('analyticsAvgRate').textContent = averageBy(records, 'rate').toFixed(2) + '%';
-    
-    updateBankAnalysisTable(bankStats);
-    updateAnalyticsChart(bankStats);
+        
+        updateElement('analyticsTotalBanks', bankStats.length);
+        updateElement('analyticsTotalFDs', records.length);
+        updateElement('analyticsTotalInvestment', formatCurrency(sumBy(records, 'amount')));
+        updateElement('analyticsTotalInterest', formatCurrency(
+            records.reduce((sum, r) => sum + calculateInterestForRecord(r), 0)
+        ));
+        updateElement('analyticsAvgRate', averageBy(records, 'rate').toFixed(2) + '%');
+        
+        updateBankAnalysisTable(bankStats);
+        updateAnalyticsChart(bankStats);
+        
+    } catch (error) {
+        console.error('Analytics update error:', error);
+        showToast('Error updating analytics', 'error');
+    }
 }
 
 function updateBankAnalysisTable(bankStats) {
     const tbody = document.getElementById('bankAnalysisTable');
-    if (!tbody) return;
+    if (!tbody || !Array.isArray(bankStats)) return;
     
-    tbody.innerHTML = bankStats.map(stat => `
-        <tr>
-            <td><strong>${stat.bank}</strong></td>
-            <td>${stat.count}</td>
-            <td>${formatCurrency(stat.totalInvestment)}</td>
-            <td>${formatCurrency(stat.totalInterest)}</td>
-            <td>${stat.avgRate.toFixed(2)}%</td>
-        </tr>
-    `).join('');
+    try {
+        tbody.innerHTML = bankStats.map(stat => `
+            <tr>
+                <td><strong>${escapeHtml(stat.bank)}</strong></td>
+                <td>${stat.count}</td>
+                <td>${formatCurrency(stat.totalInvestment)}</td>
+                <td>${formatCurrency(stat.totalInterest)}</td>
+                <td>${stat.avgRate.toFixed(2)}%</td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        console.error('Bank analysis table update error:', error);
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Error loading data</td></tr>';
+    }
 }
 
 function updateAnalyticsChart(bankStats) {
     const canvas = document.getElementById('analyticsChart');
-    if (!canvas) return;
+    if (!canvas || !Array.isArray(bankStats) || bankStats.length === 0) return;
     
-    const ctx = canvas.getContext('2d');
-    
-    const labels = bankStats.map(s => s.bank);
-    const data = bankStats.map(s => s.totalInvestment);
-    const colors = getChartColors(labels.length);
-    
-    if (analyticsChart) {
-        analyticsChart.destroy();
-    }
-    
-    analyticsChart = new Chart(ctx, {
-        type: currentChartType,
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Total Investment',
-                data: data,
-                backgroundColor: colors,
-                borderWidth: 2,
-                borderColor: '#fff'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    position: 'bottom'
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return formatCurrency(context.parsed.y || context.parsed);
-                        }
-                    }
-                }
-            },
-            scales: currentChartType === 'bar' ? {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return formatCurrency(value);
-                        }
-                    }
-                }
-            } : {}
+    try {
+        const ctx = canvas.getContext('2d');
+        
+        const labels = bankStats.map(s => s.bank);
+        const data = bankStats.map(s => s.totalInvestment);
+        const colors = getChartColors(labels.length);
+        
+        // Safely destroy existing chart
+        if (analyticsChart) {
+            analyticsChart = safeDestroyChart(analyticsChart);
         }
-    });
+        
+        const config = {
+            type: currentChartType || 'pie',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Total Investment',
+                    data: data,
+                    backgroundColor: colors,
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return formatCurrency(context.parsed.y || context.parsed);
+                            }
+                        }
+                    }
+                },
+                scales: currentChartType === 'bar' ? {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return formatCurrency(value);
+                            }
+                        }
+                    }
+                } : {}
+            }
+        };
+        
+        analyticsChart = safeCreateChart(ctx, config);
+        
+    } catch (error) {
+        console.error('Analytics chart update error:', error);
+        showToast('Error updating analytics chart', 'error');
+    }
 }
 
 function changeChartType(type) {
-    currentChartType = type;
-    
-    document.querySelectorAll('[onclick^="changeChartType"]').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    event.target.classList.add('active');
-    
-    updateAnalytics();
+    try {
+        currentChartType = type;
+        
+        // Update button states
+        document.querySelectorAll('[onclick^="changeChartType"]').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        
+        if (event && event.target) {
+            event.target.classList.add('active');
+        }
+        
+        updateAnalytics();
+    } catch (error) {
+        console.error('Chart type change error:', error);
+    }
 }
 
 // ===================================
-// Enhanced Interest Calculator Functions
-// COMPLETE FIXED VERSION
+// Enhanced Interest Calculator Functions (FIXED)
 // ===================================
 
-let interestComparisonChartInstance = null;
+// Use a single chart instance with proper naming
+let interestComparisonChart = null;
 
 /**
  * Toggle between manual and existing FD mode
  */
 function toggleCalcMode() {
-    const mode = document.getElementById('calcMode').value;
-    
-    if (mode === 'existing') {
-        document.getElementById('existingFDSection').style.display = 'block';
-        document.getElementById('manualInputSection').style.display = 'none';
-        loadAccountHoldersForCalc();
-    } else {
-        document.getElementById('existingFDSection').style.display = 'none';
-        document.getElementById('manualInputSection').style.display = 'block';
+    try {
+        const mode = document.getElementById('calcMode')?.value;
+        
+        if (mode === 'existing') {
+            const existingSection = document.getElementById('existingFDSection');
+            const manualSection = document.getElementById('manualInputSection');
+            
+            if (existingSection) existingSection.style.display = 'block';
+            if (manualSection) manualSection.style.display = 'none';
+            
+            loadAccountHoldersForCalc();
+        } else {
+            const existingSection = document.getElementById('existingFDSection');
+            const manualSection = document.getElementById('manualInputSection');
+            
+            if (existingSection) existingSection.style.display = 'none';
+            if (manualSection) manualSection.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Calc mode toggle error:', error);
     }
 }
 
@@ -154,405 +249,633 @@ function toggleCalcMode() {
  * Load account holders for calculator
  */
 function loadAccountHoldersForCalc() {
-    const holders = getData('fd_account_holders') || [];
-    const select = document.getElementById('calcAccountHolder');
-    
-    if (!select) return;
-    
-    select.innerHTML = '<option value="">Select Holder</option>';
-    holders.forEach(holder => {
-        const option = document.createElement('option');
-        option.value = holder;
-        option.textContent = holder;
-        select.appendChild(option);
-    });
+    try {
+        if (!pinHash) {
+            console.warn('Cannot load account holders: PIN not initialized');
+            return;
+        }
+        
+        const holders = getData('fd_account_holders') || [];
+        const select = document.getElementById('calcAccountHolder');
+        
+        if (!select) return;
+        
+        select.innerHTML = '<option value="">Select Holder</option>';
+        holders.forEach(holder => {
+            const option = document.createElement('option');
+            option.value = holder;
+            option.textContent = holder;
+            select.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Load account holders for calc error:', error);
+    }
 }
 
 /**
  * Load FDs for selected holder
  */
 function loadFDsForCalc() {
-    const holder = document.getElementById('calcAccountHolder').value;
-    const select = document.getElementById('calcFDSelect');
-    
-    if (!holder || !select) {
+    try {
+        if (!pinHash) {
+            console.warn('Cannot load FDs: PIN not initialized');
+            return;
+        }
+        
+        const holder = document.getElementById('calcAccountHolder')?.value;
+        const select = document.getElementById('calcFDSelect');
+        
+        if (!holder || !select) {
+            if (select) select.innerHTML = '<option value="">Select FD</option>';
+            return;
+        }
+        
+        let records = getData('fd_records') || [];
+        records = records.filter(r => r.accountHolder === holder);
+        
         select.innerHTML = '<option value="">Select FD</option>';
-        return;
+        records.forEach(r => {
+            const option = document.createElement('option');
+            option.value = r.id;
+            option.textContent = `${r.bank} - ${formatCurrency(r.amount)} @ ${r.rate}% (${r.duration} ${r.durationUnit})`;
+            select.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Load FDs for calc error:', error);
     }
-    
-    let records = getData('fd_records') || [];
-    records = records.filter(r => r.accountHolder === holder);
-    
-    select.innerHTML = '<option value="">Select FD</option>';
-    records.forEach(r => {
-        const option = document.createElement('option');
-        option.value = r.id;
-        option.textContent = `${r.bank} - ${formatCurrency(r.amount)} @ ${r.rate}% (${r.duration} ${r.durationUnit})`;
-        select.appendChild(option);
-    });
 }
 
 /**
  * Fill calculator from selected FD
  */
 function fillCalcFromFD() {
-    const fdId = document.getElementById('calcFDSelect').value;
-    if (!fdId) return;
-    
-    const records = getData('fd_records') || [];
-    const record = records.find(r => r.id === fdId);
-    
-    if (!record) return;
-    
-    document.getElementById('calcPrincipal').value = record.amount;
-    document.getElementById('calcRate').value = record.rate;
-    document.getElementById('calcDuration').value = record.duration;
-    document.getElementById('calcUnit').value = record.durationUnit;
-    
-    // Set date range
-    const maturityDate = record.maturityDate || calculateMaturityDate(
-        record.startDate, record.duration, record.durationUnit
-    );
-    document.getElementById('calcFromDate').value = record.startDate;
-    document.getElementById('calcToDate').value = maturityDate;
-    
-    showToast('FD data loaded into calculator', 'success');
+    try {
+        if (!pinHash) {
+            showToast('Please log in first', 'error');
+            return;
+        }
+        
+        const fdId = document.getElementById('calcFDSelect')?.value;
+        if (!fdId) return;
+        
+        const records = getData('fd_records') || [];
+        const record = records.find(r => r.id === fdId);
+        
+        if (!record) return;
+        
+        // Fill form fields safely
+        const fields = {
+            'calcPrincipal': record.amount,
+            'calcRate': record.rate,
+            'calcDuration': record.duration,
+            'calcUnit': record.durationUnit
+        };
+        
+        Object.keys(fields).forEach(fieldId => {
+            const element = document.getElementById(fieldId);
+            if (element) element.value = fields[fieldId];
+        });
+        
+        // Set date range
+        const maturityDate = record.maturityDate || calculateMaturityDate(
+            record.startDate, record.duration, record.durationUnit
+        );
+        
+        const fromDateEl = document.getElementById('calcFromDate');
+        const toDateEl = document.getElementById('calcToDate');
+        
+        if (fromDateEl) fromDateEl.value = record.startDate;
+        if (toDateEl) toDateEl.value = maturityDate;
+        
+        showToast('FD data loaded into calculator', 'success');
+    } catch (error) {
+        console.error('Fill calc from FD error:', error);
+        showToast('Error loading FD data', 'error');
+    }
 }
 
 /**
  * Toggle custom date range
  */
 function toggleCalcDateRange() {
-    const checked = document.getElementById('calcCustomDateRange').checked;
-    document.getElementById('calcDateRangeDiv').style.display = checked ? 'block' : 'none';
+    try {
+        const checked = document.getElementById('calcCustomDateRange')?.checked;
+        const rangeDiv = document.getElementById('calcDateRangeDiv');
+        if (rangeDiv) {
+            rangeDiv.style.display = checked ? 'block' : 'none';
+        }
+    } catch (error) {
+        console.error('Toggle calc date range error:', error);
+    }
+}
+
+/**
+ * Toggle manual date range
+ */
+function toggleManualDateRange() {
+    try {
+        const checked = document.getElementById('calcManualDateRange')?.checked;
+        const durationDiv = document.getElementById('calcManualDateRangeDiv');
+        const durationInput = document.getElementById('calcDuration')?.parentElement?.parentElement;
+        
+        if (checked) {
+            if (durationDiv) durationDiv.style.display = 'block';
+            if (durationInput) durationInput.style.display = 'none';
+            
+            // Set default dates if empty
+            const startInput = document.getElementById('calcManualStartDate');
+            const endInput = document.getElementById('calcManualEndDate');
+            if (startInput && !startInput.value) {
+                const today = new Date().toISOString().split('T')[0];
+                startInput.value = today;
+                
+                if (endInput) {
+                    const tenDaysLater = new Date();
+                    tenDaysLater.setDate(tenDaysLater.getDate() + 10);
+                    endInput.value = tenDaysLater.toISOString().split('T')[0];
+                }
+            }
+        } else {
+            if (durationDiv) durationDiv.style.display = 'none';
+            if (durationInput) durationInput.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Toggle manual date range error:', error);
+    }
 }
 
 /**
  * Calculate duration from custom dates
  */
 function calculateDurationFromDates(fromDate, toDate) {
-    const start = new Date(fromDate);
-    const end = new Date(toDate);
-    const diffTime = Math.abs(end - start);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
+    try {
+        const start = new Date(fromDate);
+        const end = new Date(toDate);
+        const diffTime = Math.abs(end - start);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays;
+    } catch (error) {
+        console.error('Calculate duration from dates error:', error);
+        return 0;
+    }
 }
 
 /**
- * Main calculation function
+ * Main calculation function (IMPROVED)
  */
 function performCalculation() {
-    const mode = document.getElementById('calcMode').value;
-    let principal, rate, durationValue, unit;
-    
-    // Get values based on mode
-    principal = parseFloat(document.getElementById('calcPrincipal').value);
-    rate = parseFloat(document.getElementById('calcRate').value);
-    
-    // Check for custom date range
-    const useCustomRange = mode === 'existing' && document.getElementById('calcCustomDateRange')?.checked;
-    
-    if (useCustomRange) {
-        const fromDate = document.getElementById('calcFromDate').value;
-        const toDate = document.getElementById('calcToDate').value;
+    try {
+        const mode = document.getElementById('calcMode')?.value;
+        let principal, rate, durationValue, unit;
         
-        if (!fromDate || !toDate) {
-            showToast('Please select both From and To dates', 'error');
+        // Get values based on mode
+        principal = parseFloat(document.getElementById('calcPrincipal')?.value);
+        rate = parseFloat(document.getElementById('calcRate')?.value);
+        
+        // Check for date range input
+        const useDateRange = (mode === 'existing' && document.getElementById('calcCustomDateRange')?.checked) ||
+                             (mode === 'manual' && document.getElementById('calcManualDateRange')?.checked);
+        
+        let fromDate, toDate;
+        if (useDateRange) {
+            if (mode === 'existing') {
+                fromDate = document.getElementById('calcFromDate')?.value;
+                toDate = document.getElementById('calcToDate')?.value;
+                
+                if (!isValidDate(fromDate) || !isValidDate(toDate)) {
+                    showToast('Please select valid dates', 'error');
+                    return;
+                }
+                
+                // Swap dates if from > to
+                if (new Date(fromDate) > new Date(toDate)) {
+                    [fromDate, toDate] = [toDate, fromDate];
+                    if (document.getElementById('calcFromDate')) document.getElementById('calcFromDate').value = fromDate;
+                    if (document.getElementById('calcToDate')) document.getElementById('calcToDate').value = toDate;
+                }
+                
+                // Cap dates to FD term
+                const fdId = document.getElementById('calcFDSelect')?.value;
+                const records = getData('fd_records') || [];
+                const record = records.find(r => r.id === fdId);
+                if (record) {
+                    const maturityDate = calculateMaturityDate(record.startDate, record.duration, record.durationUnit);
+                    const fdStart = new Date(record.startDate);
+                    const fdEnd = new Date(maturityDate);
+                    const customFrom = new Date(fromDate);
+                    const customTo = new Date(toDate);
+                    
+                    if (customFrom < fdStart) {
+                        fromDate = record.startDate;
+                        if (document.getElementById('calcFromDate')) document.getElementById('calcFromDate').value = fromDate;
+                    }
+                    if (customTo > fdEnd) {
+                        toDate = maturityDate;
+                        if (document.getElementById('calcToDate')) document.getElementById('calcToDate').value = toDate;
+                    }
+                }
+            } else { // manual
+                fromDate = document.getElementById('calcManualStartDate')?.value;
+                toDate = document.getElementById('calcManualEndDate')?.value;
+                
+                if (!isValidDate(fromDate) || !isValidDate(toDate)) {
+                    showToast('Please select valid dates', 'error');
+                    return;
+                }
+                
+                // Swap dates if from > to
+                if (new Date(fromDate) > new Date(toDate)) {
+                    [fromDate, toDate] = [toDate, fromDate];
+                    if (document.getElementById('calcManualStartDate')) document.getElementById('calcManualStartDate').value = fromDate;
+                    if (document.getElementById('calcManualEndDate')) document.getElementById('calcManualEndDate').value = toDate;
+                }
+            }
+            
+            if (!fromDate || !toDate) {
+                showToast('Please select both start and end dates', 'error');
+                return;
+            }
+            
+            const days = calculateDurationFromDates(fromDate, toDate);
+            durationValue = days;
+            unit = 'Days';
+        } else {
+            durationValue = parseInt(document.getElementById('calcDuration')?.value);
+            unit = document.getElementById('calcUnit')?.value;
+        }
+        
+        const frequency = parseInt(document.getElementById('calcFrequency')?.value);
+        
+        // Adjust principal for existing FD if fromDate is after startDate
+        if (useDateRange && mode === 'existing') {
+            const fdId = document.getElementById('calcFDSelect')?.value;
+            const records = getData('fd_records') || [];
+            const record = records.find(r => r.id === fdId);
+            
+            if (record && record.startDate && fromDate) {
+                const startDate = new Date(record.startDate);
+                const customFromDate = new Date(fromDate);
+                
+                if (customFromDate > startDate) {
+                    // Calculate maturity amount at fromDate
+                    const daysToFrom = calculateDurationFromDates(record.startDate, fromDate);
+                    const monthsToFrom = (daysToFrom / 365) * 12; // More accurate
+                    const maturityAtFrom = record.amount + calculateCompoundInterest(record.amount, record.rate, monthsToFrom, frequency);
+                    principal = maturityAtFrom;
+                }
+            }
+        }
+        
+        // Enhanced validation
+        if (!isValidAmount(principal)) {
+            showToast('Please enter valid principal amount', 'error');
             return;
         }
         
-        const days = calculateDurationFromDates(fromDate, toDate);
-        durationValue = days;
-        unit = 'Days';
-    } else {
-        durationValue = parseInt(document.getElementById('calcDuration').value);
-        unit = document.getElementById('calcUnit').value;
+        if (!isValidRate(rate)) {
+            showToast('Please enter valid interest rate (0-100%)', 'error');
+            return;
+        }
+        
+        if (!durationValue || durationValue <= 0) {
+            showToast('Please enter valid duration', 'error');
+            return;
+        }
+        
+        // Calculate in months
+        let months;
+        if (unit === 'Days') {
+            months = (durationValue / 365) * 12; // More accurate calculation
+        } else if (unit === 'Years') {
+            months = durationValue * 12;
+        } else {
+            months = durationValue;
+        }
+        
+        if (months <= 0) {
+            showToast('Invalid duration calculation', 'error');
+            return;
+        }
+        
+        // Calculate interest
+        const simpleInterest = calculateSimpleInterest(principal, rate, months);
+        const compoundInterest = calculateCompoundInterest(principal, rate, months, frequency);
+        const maturityAmount = principal + compoundInterest;
+        const difference = compoundInterest - simpleInterest;
+        
+        // Get frequency name
+        const frequencyNames = {
+            '4': 'Quarterly (4/year)',
+            '12': 'Monthly (12/year)',
+            '1': 'Annually (1/year)',
+            '365': 'Daily (365/year)',
+            '0': 'At Maturity (Simple)'
+        };
+        
+        // Display results safely
+        const resultFields = {
+            'resultPrincipal': formatCurrency(principal),
+            'resultRate': rate + '% p.a.',
+            'resultDuration': `${durationValue} ${unit}`,
+            'resultFrequency': frequencyNames[frequency] || 'Unknown',
+            'resultSimple': formatCurrency(simpleInterest),
+            'resultCompound': formatCurrency(compoundInterest),
+            'resultMaturity': formatCurrency(maturityAmount),
+            'resultDifference': formatCurrency(difference)
+        };
+        
+        Object.keys(resultFields).forEach(fieldId => {
+            const element = document.getElementById(fieldId);
+            if (element) element.textContent = resultFields[fieldId];
+        });
+        
+        // Show/hide result sections
+        const resultsEl = document.getElementById('calcResults');
+        const noResultsEl = document.getElementById('noCalcResults');
+        
+        if (resultsEl) resultsEl.style.display = 'block';
+        if (noResultsEl) noResultsEl.style.display = 'none';
+        
+        // Show comparison chart
+        showInterestComparison(principal, simpleInterest, compoundInterest);
+        
+        // Success message
+        showToast('Calculation completed successfully!', 'success');
+        
+    } catch (error) {
+        console.error('Calculation error:', error);
+        showToast('Error performing calculation: ' + error.message, 'error');
     }
-    
-    const frequency = parseInt(document.getElementById('calcFrequency').value);
-    
-    // Validation
-    if (!principal || principal <= 0) {
-        showToast('Please enter valid principal amount', 'error');
-        return;
-    }
-    
-    if (!rate || rate <= 0) {
-        showToast('Please enter valid interest rate', 'error');
-        return;
-    }
-    
-    if (!durationValue || durationValue <= 0) {
-        showToast('Please enter valid duration', 'error');
-        return;
-    }
-    
-    // Calculate in months
-    let months;
-    if (unit === 'Days') {
-        months = durationValue / 30; // Approximate
-    } else if (unit === 'Years') {
-        months = durationValue * 12;
-    } else {
-        months = durationValue;
-    }
-    
-    // Calculate interest
-    const simpleInterest = calculateSimpleInterest(principal, rate, months);
-    const compoundInterest = calculateCompoundInterest(principal, rate, months, frequency);
-    const maturityAmount = principal + compoundInterest;
-    const difference = compoundInterest - simpleInterest;
-    
-    // Get frequency name
-    const frequencyNames = {
-        '4': 'Quarterly (4/year)',
-        '12': 'Monthly (12/year)',
-        '1': 'Annually (1/year)',
-        '365': 'Daily (365/year)',
-        '0': 'At Maturity (Simple)'
-    };
-    
-    // Display results
-    document.getElementById('resultPrincipal').textContent = formatCurrency(principal);
-    document.getElementById('resultRate').textContent = rate + '% p.a.';
-    document.getElementById('resultDuration').textContent = `${durationValue} ${unit}`;
-    document.getElementById('resultFrequency').textContent = frequencyNames[frequency];
-    document.getElementById('resultSimple').textContent = formatCurrency(simpleInterest);
-    document.getElementById('resultCompound').textContent = formatCurrency(compoundInterest);
-    document.getElementById('resultMaturity').textContent = formatCurrency(maturityAmount);
-    document.getElementById('resultDifference').textContent = formatCurrency(difference);
-    
-    // Show results
-    document.getElementById('calcResults').style.display = 'block';
-    document.getElementById('noCalcResults').style.display = 'none';
-    
-    // Show comparison chart
-    showInterestComparison(principal, simpleInterest, compoundInterest);
-    
-    // Success message
-    showToast('Calculation completed successfully!', 'success');
 }
 
 /**
  * Show interest comparison chart (FIXED)
  */
 function showInterestComparison(principal, simpleInterest, compoundInterest) {
-    const comparisonCard = document.getElementById('comparisonCard');
-    const canvas = document.getElementById('interestComparisonChart');
-    
-    if (!canvas) return;
-    
-    comparisonCard.style.display = 'block';
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Destroy existing chart - FIXED
-    if (interestComparisonChartInstance) {
-        interestComparisonChartInstance.destroy();
-        interestComparisonChartInstance = null;
-    }
-    
-    // Create new chart
-    interestComparisonChartInstance = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: ['Principal', 'Simple Interest', 'Compound Interest'],
-            datasets: [{
-                label: 'Amount (NRs)',
-                data: [principal, simpleInterest, compoundInterest],
-                backgroundColor: [
-                    'rgba(13, 110, 253, 0.7)',
-                    'rgba(255, 193, 7, 0.7)',
-                    'rgba(25, 135, 84, 0.7)'
-                ],
-                borderColor: [
-                    'rgb(13, 110, 253)',
-                    'rgb(255, 193, 7)',
-                    'rgb(25, 135, 84)'
-                ],
-                borderWidth: 2
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return formatCurrency(context.parsed.y);
+    try {
+        const comparisonCard = document.getElementById('comparisonCard');
+        const canvas = document.getElementById('interestComparisonChart');
+        
+        if (!canvas) {
+            console.warn('Interest comparison chart canvas not found');
+            return;
+        }
+        
+        if (comparisonCard) {
+            comparisonCard.style.display = 'block';
+        }
+        
+        const ctx = canvas.getContext('2d');
+        
+        // Safely destroy existing chart - THIS IS THE FIX
+        if (interestComparisonChart) {
+            interestComparisonChart = safeDestroyChart(interestComparisonChart);
+        }
+        
+        const config = {
+            type: 'bar',
+            data: {
+                labels: ['Principal', 'Simple Interest', 'Compound Interest'],
+                datasets: [{
+                    label: 'Amount (NRs)',
+                    data: [principal, simpleInterest, compoundInterest],
+                    backgroundColor: [
+                        'rgba(13, 110, 253, 0.7)',
+                        'rgba(255, 193, 7, 0.7)',
+                        'rgba(25, 135, 84, 0.7)'
+                    ],
+                    borderColor: [
+                        'rgb(13, 110, 253)',
+                        'rgb(255, 193, 7)',
+                        'rgb(25, 135, 84)'
+                    ],
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return formatCurrency(context.parsed.y);
+                            }
                         }
                     }
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return formatCurrency(value);
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return formatCurrency(value);
+                            }
                         }
                     }
                 }
             }
-        }
-    });
+        };
+        
+        // Create new chart
+        interestComparisonChart = safeCreateChart(ctx, config);
+        
+    } catch (error) {
+        console.error('Interest comparison chart error:', error);
+        showToast('Error creating comparison chart', 'error');
+    }
 }
 
 /**
  * Set calculator preset values
  */
 function setCalcPreset(amount, rate, duration, unit) {
-    document.getElementById('calcMode').value = 'manual';
-    toggleCalcMode();
-    
-    document.getElementById('calcPrincipal').value = amount;
-    document.getElementById('calcRate').value = rate;
-    document.getElementById('calcDuration').value = duration;
-    document.getElementById('calcUnit').value = unit;
-    
-    showToast('Preset values loaded. Click Calculate to see results.', 'info');
+    try {
+        const modeEl = document.getElementById('calcMode');
+        if (modeEl) {
+            modeEl.value = 'manual';
+            toggleCalcMode();
+        }
+        
+        const fields = {
+            'calcPrincipal': amount,
+            'calcRate': rate,
+            'calcDuration': duration,
+            'calcUnit': unit
+        };
+        
+        Object.keys(fields).forEach(fieldId => {
+            const element = document.getElementById(fieldId);
+            if (element) element.value = fields[fieldId];
+        });
+        
+        showToast('Preset values loaded. Click Calculate to see results.', 'info');
+    } catch (error) {
+        console.error('Set calc preset error:', error);
+    }
 }
 
 /**
  * Print calculation results
  */
 function printCalculation() {
-    const principal = document.getElementById('resultPrincipal').textContent;
-    const rate = document.getElementById('resultRate').textContent;
-    const duration = document.getElementById('resultDuration').textContent;
-    const frequency = document.getElementById('resultFrequency').textContent;
-    const simple = document.getElementById('resultSimple').textContent;
-    const compound = document.getElementById('resultCompound').textContent;
-    const maturity = document.getElementById('resultMaturity').textContent;
-    const difference = document.getElementById('resultDifference').textContent;
-    
-    const printWindow = window.open('', '', 'height=600,width=800');
-    printWindow.document.write(`
-        <html>
-        <head>
-            <title>FD Interest Calculation - FD Manager Pro</title>
-            <style>
-                body { font-family: Arial, sans-serif; padding: 20px; }
-                h2 { color: #0d6efd; border-bottom: 2px solid #0d6efd; padding-bottom: 10px; }
-                table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-                th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-                th { background-color: #f8f9fa; font-weight: bold; }
-                .highlight { background-color: #fff3cd; font-size: 1.2em; font-weight: bold; }
-                .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 0.9em; color: #666; }
-            </style>
-        </head>
-        <body>
-            <h2>FD Manager Pro - Nepal Edition</h2>
-            <h3>Interest Calculation Report</h3>
-            <p><strong>Generated on:</strong> ${new Date().toLocaleString()}</p>
-            
-            <table>
-                <tr><th>Description</th><th>Value</th></tr>
-                <tr><td>Principal Amount</td><td>${principal}</td></tr>
-                <tr><td>Interest Rate</td><td>${rate}</td></tr>
-                <tr><td>Duration</td><td>${duration}</td></tr>
-                <tr><td>Compounding Frequency</td><td>${frequency}</td></tr>
-                <tr><td>Simple Interest</td><td>${simple}</td></tr>
-                <tr><td>Compound Interest</td><td>${compound}</td></tr>
-                <tr><td>Extra Earnings (Compound vs Simple)</td><td>${difference}</td></tr>
-                <tr class="highlight"><td>Total Maturity Amount</td><td>${maturity}</td></tr>
-            </table>
-            
-            <div class="footer">
-                <p><strong>Note:</strong> This is an estimate based on standard calculation formulas. 
-                Actual returns may vary based on bank policies, early withdrawal penalties, and tax deductions (TDS).</p>
-                <p><strong>Disclaimer:</strong> FD Manager Pro is a calculation tool. Please verify with your bank for exact figures.</p>
-            </div>
-        </body>
-        </html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
+    try {
+        const principal = document.getElementById('resultPrincipal')?.textContent;
+        const rate = document.getElementById('resultRate')?.textContent;
+        const duration = document.getElementById('resultDuration')?.textContent;
+        const frequency = document.getElementById('resultFrequency')?.textContent;
+        const simple = document.getElementById('resultSimple')?.textContent;
+        const compound = document.getElementById('resultCompound')?.textContent;
+        const maturity = document.getElementById('resultMaturity')?.textContent;
+        const difference = document.getElementById('resultDifference')?.textContent;
+        
+        const printWindow = window.open('', '', 'height=600,width=800');
+        printWindow.document.write(`
+            <html>
+            <head>
+                <title>FD Interest Calculation - FD Manager Pro</title>
+                <style>
+                    body { font-family: Arial, sans-serif; padding: 20px; }
+                    h2 { color: #0d6efd; border-bottom: 2px solid #0d6efd; padding-bottom: 10px; }
+                    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+                    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+                    th { background-color: #f8f9fa; font-weight: bold; }
+                    .highlight { background-color: #fff3cd; font-size: 1.2em; font-weight: bold; }
+                    .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 0.9em; color: #666; }
+                </style>
+            </head>
+            <body>
+                <h2>FD Manager Pro - Nepal Edition</h2>
+                <h3>Interest Calculation Report</h3>
+                <p><strong>Generated on:</strong> ${new Date().toLocaleString()}</p>
+                
+                <table>
+                    <tr><th>Description</th><th>Value</th></tr>
+                    <tr><td>Principal Amount</td><td>${principal}</td></tr>
+                    <tr><td>Interest Rate</td><td>${rate}</td></tr>
+                    <tr><td>Duration</td><td>${duration}</td></tr>
+                    <tr><td>Compounding Frequency</td><td>${frequency}</td></tr>
+                    <tr><td>Simple Interest</td><td>${simple}</td></tr>
+                    <tr><td>Compound Interest</td><td>${compound}</td></tr>
+                    <tr><td>Extra Earnings (Compound vs Simple)</td><td>${difference}</td></tr>
+                    <tr class="highlight"><td>Total Maturity Amount</td><td>${maturity}</td></tr>
+                </table>
+                
+                <div class="footer">
+                    <p><strong>Note:</strong> This is an estimate based on standard calculation formulas. 
+                    Actual returns may vary based on bank policies, early withdrawal penalties, and tax deductions (TDS).</p>
+                    <p><strong>Disclaimer:</strong> FD Manager Pro is a calculation tool. Please verify with your bank for exact figures.</p>
+                </div>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+        printWindow.print();
+    } catch (error) {
+        console.error('Print calculation error:', error);
+        showToast('Error printing calculation', 'error');
+    }
 }
 
 /**
  * Save calculation to history
  */
 function saveCalculationToHistory() {
-    const calculation = {
-        id: generateId(),
-        timestamp: new Date().toISOString(),
-        principal: document.getElementById('resultPrincipal').textContent,
-        rate: document.getElementById('resultRate').textContent,
-        duration: document.getElementById('resultDuration').textContent,
-        compoundInterest: document.getElementById('resultCompound').textContent,
-        maturityAmount: document.getElementById('resultMaturity').textContent
-    };
-    
-    let history = JSON.parse(localStorage.getItem('calc_history') || '[]');
-    history.unshift(calculation); // Add to beginning
-    
-    // Keep only last 10
-    if (history.length > 10) {
-        history = history.slice(0, 10);
+    try {
+        const calculation = {
+            id: generateId(),
+            timestamp: new Date().toISOString(),
+            principal: document.getElementById('resultPrincipal')?.textContent,
+            rate: document.getElementById('resultRate')?.textContent,
+            duration: document.getElementById('resultDuration')?.textContent,
+            compoundInterest: document.getElementById('resultCompound')?.textContent,
+            maturityAmount: document.getElementById('resultMaturity')?.textContent
+        };
+        
+        let history = JSON.parse(localStorage.getItem('calc_history') || '[]');
+        history.unshift(calculation); // Add to beginning
+        
+        // Keep only last 10
+        if (history.length > 10) {
+            history = history.slice(0, 10);
+        }
+        
+        localStorage.setItem('calc_history', JSON.stringify(history));
+        displayCalculationHistory();
+        
+        showToast('Calculation saved to history', 'success');
+    } catch (error) {
+        console.error('Save calculation to history error:', error);
+        showToast('Error saving calculation', 'error');
     }
-    
-    localStorage.setItem('calc_history', JSON.stringify(history));
-    displayCalculationHistory();
-    
-    showToast('Calculation saved to history', 'success');
 }
 
 /**
  * Display calculation history
  */
 function displayCalculationHistory() {
-    const history = JSON.parse(localStorage.getItem('calc_history') || '[]');
-    const container = document.getElementById('calculationHistory');
-    
-    if (!container) return;
-    
-    if (history.length === 0) {
-        container.innerHTML = '<p class="text-muted small">No saved calculations</p>';
-        return;
-    }
-    
-    container.innerHTML = history.map(calc => `
-        <div class="card mb-2">
-            <div class="card-body p-2">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div class="small">
-                        <strong>${calc.principal}</strong> @ ${calc.rate} for ${calc.duration}<br>
-                        <span class="text-success"><strong>Interest:</strong> ${calc.compoundInterest}</span><br>
-                        <small class="text-muted">${formatDate(calc.timestamp)}</small>
+    try {
+        const history = JSON.parse(localStorage.getItem('calc_history') || '[]');
+        const container = document.getElementById('calculationHistory');
+        
+        if (!container) return;
+        
+        if (history.length === 0) {
+            container.innerHTML = '<p class="text-muted small">No saved calculations</p>';
+            return;
+        }
+        
+        container.innerHTML = history.map(calc => `
+            <div class="card mb-2">
+                <div class="card-body p-2">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div class="small">
+                            <strong>${calc.principal}</strong> @ ${calc.rate} for ${calc.duration}<br>
+                            <span class="text-success"><strong>Interest:</strong> ${calc.compoundInterest}</span><br>
+                            <small class="text-muted">${formatDate(calc.timestamp)}</small>
+                        </div>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteCalculationHistory('${calc.id}')">
+                            <i class="bi bi-trash"></i>
+                        </button>
                     </div>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteCalculationHistory('${calc.id}')">
-                        <i class="bi bi-trash"></i>
-                    </button>
                 </div>
             </div>
-        </div>
-    `).join('');
+        `).join('');
+    } catch (error) {
+        console.error('Display calculation history error:', error);
+    }
 }
 
 /**
  * Delete calculation from history
  */
 function deleteCalculationHistory(id) {
-    let history = JSON.parse(localStorage.getItem('calc_history') || '[]');
-    history = history.filter(c => c.id !== id);
-    localStorage.setItem('calc_history', JSON.stringify(history));
-    displayCalculationHistory();
+    try {
+        let history = JSON.parse(localStorage.getItem('calc_history') || '[]');
+        history = history.filter(c => c.id !== id);
+        localStorage.setItem('calc_history', JSON.stringify(history));
+        displayCalculationHistory();
+    } catch (error) {
+        console.error('Delete calculation history error:', error);
+    }
 }
 
 /**
  * Clear all calculation history
  */
 function clearCalculationHistory() {
-    if (!confirm('Clear all calculation history?')) return;
-    
-    localStorage.setItem('calc_history', '[]');
-    displayCalculationHistory();
-    showToast('History cleared', 'success');
+    try {
+        if (!confirm('Clear all calculation history?')) return;
+        
+        localStorage.setItem('calc_history', '[]');
+        displayCalculationHistory();
+        showToast('History cleared', 'success');
+    } catch (error) {
+        console.error('Clear calculation history error:', error);
+    }
 }
 
 // Keep backward compatibility
@@ -560,64 +883,80 @@ function calculateInterest() {
     performCalculation();
 }
 
-// Load calculation history on page load
-document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(() => {
-        displayCalculationHistory();
-    }, 1000);
-});
 // ===================================
-// Certificate Functions
+// Certificate Functions (IMPROVED)
 // ===================================
 
 function loadCertificates() {
-    const records = getData('fd_records') || [];
-    const recordsWithCerts = records.filter(r => r.certificate);
-    
-    const container = document.getElementById('certificatesGallery');
-    if (!container) return;
-    
-    if (recordsWithCerts.length === 0) {
-        container.innerHTML = '<div class="col-12 text-center text-muted"><p>No certificates uploaded yet</p></div>';
-        return;
-    }
-    
-    container.innerHTML = recordsWithCerts.map(record => {
-        const isPDF = record.certificate?.startsWith('data:application/pdf');
+    try {
+        if (!pinHash) {
+            console.warn('Cannot load certificates: PIN not initialized');
+            return;
+        }
         
-        return `
-            <div class="col-md-3 col-sm-6 mb-3">
-                <div class="card">
-                    <div class="card-body text-center">
-                        ${isPDF ? 
-                            '<i class="bi bi-file-pdf-fill" style="font-size: 5rem; color: #dc3545;"></i>' :
-                            `<img src="${record.certificate}" style="max-width:100%; max-height:200px;" alt="Certificate">`
-                        }
-                        <h6 class="mt-2">${record.bank}</h6>
-                        <p class="mb-1"><strong>${record.accountHolder}</strong></p>
-                        <p class="mb-0">${formatCurrency(record.amount)}</p>
+        const records = getData('fd_records') || [];
+        const recordsWithCerts = records.filter(r => r.certificate);
+        
+        const container = document.getElementById('certificatesGallery');
+        if (!container) return;
+        
+        if (recordsWithCerts.length === 0) {
+            container.innerHTML = '<div class="col-12 text-center text-muted"><p>No certificates uploaded yet</p></div>';
+            return;
+        }
+        
+        container.innerHTML = recordsWithCerts.map(record => {
+            const isPDF = record.certificate?.startsWith('data:application/pdf');
+            
+            return `
+                <div class="col-md-3 col-sm-6 mb-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            ${isPDF ? 
+                                '<i class="bi bi-file-pdf-fill" style="font-size: 5rem; color: #dc3545;"></i>' :
+                                `<img src="${record.certificate}" style="max-width:100%; max-height:200px;" alt="Certificate">`
+                            }
+                            <h6 class="mt-2">${escapeHtml(record.bank)}</h6>
+                            <p class="mb-1"><strong>${escapeHtml(record.accountHolder)}</strong></p>
+                            <p class="mb-0">${formatCurrency(record.amount)}</p>
+                        </div>
                     </div>
                 </div>
-            </div>
-        `;
-    }).join('');
+            `;
+        }).join('');
+        
+    } catch (error) {
+        console.error('Load certificates error:', error);
+        const container = document.getElementById('certificatesGallery');
+        if (container) {
+            container.innerHTML = '<div class="col-12 text-center text-danger"><p>Error loading certificates</p></div>';
+        }
+    }
 }
 
-// ===================================
-// ===================================
 // ===================================
 // Export Functions
 // ===================================
 
 function exportAllPDF() {
-    const records = getData('fd_records') || [];
-    
-    if (records.length === 0) {
-        showToast('No records to export', 'warning');
-        return;
-    }
-    
     try {
+        if (!pinHash) {
+            showToast('Please log in first', 'error');
+            return;
+        }
+        
+        const records = getData('fd_records') || [];
+        
+        if (records.length === 0) {
+            showToast('No records to export', 'warning');
+            return;
+        }
+        
+        if (typeof jsPDF === 'undefined') {
+            showToast('PDF library not loaded. Please refresh the page.', 'error');
+            return;
+        }
+        
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
         
@@ -673,14 +1012,19 @@ function exportAllPDF() {
 }
 
 function exportToExcel() {
-    const records = getData('fd_records') || [];
-    
-    if (records.length === 0) {
-        showToast('No records to export', 'warning');
-        return;
-    }
-    
     try {
+        if (!pinHash) {
+            showToast('Please log in first', 'error');
+            return;
+        }
+        
+        const records = getData('fd_records') || [];
+        
+        if (records.length === 0) {
+            showToast('No records to export', 'warning');
+            return;
+        }
+        
         const excelData = records.map(record => {
             const maturityDate = record.maturityDate || calculateMaturityDate(
                 record.startDate, record.duration, record.durationUnit
@@ -716,35 +1060,35 @@ function exportToExcel() {
 
 /**
  * Check if two records are duplicates based on key fields
- * @param {Object} record1 
- * @param {Object} record2 
- * @returns {boolean}
  */
 function areRecordsDuplicate(record1, record2) {
-    // Match criteria: same account holder, bank, amount, and start date
-    return (
-        record1.accountHolder.toLowerCase().trim() === record2.accountHolder.toLowerCase().trim() &&
-        record1.bank.toLowerCase().trim() === record2.bank.toLowerCase().trim() &&
-        parseFloat(record1.amount) === parseFloat(record2.amount) &&
-        record1.startDate === record2.startDate
-    );
+    try {
+        return (
+            record1.accountHolder.toLowerCase().trim() === record2.accountHolder.toLowerCase().trim() &&
+            record1.bank.toLowerCase().trim() === record2.bank.toLowerCase().trim() &&
+            parseFloat(record1.amount) === parseFloat(record2.amount) &&
+            record1.startDate === record2.startDate
+        );
+    } catch (error) {
+        console.error('Duplicate check error:', error);
+        return false;
+    }
 }
 
 /**
  * Find duplicate record in existing records
- * @param {Object} newRecord 
- * @param {Array} existingRecords 
- * @returns {Object|null} - Returns the matching record or null
  */
 function findDuplicateRecord(newRecord, existingRecords) {
-    return existingRecords.find(existing => areRecordsDuplicate(newRecord, existing)) || null;
+    try {
+        return existingRecords.find(existing => areRecordsDuplicate(newRecord, existing)) || null;
+    } catch (error) {
+        console.error('Find duplicate error:', error);
+        return null;
+    }
 }
 
 /**
  * Analyze import data and categorize records
- * @param {Array} importRecords - Records to import
- * @param {Array} existingRecords - Current records in system
- * @returns {Object} - Categorized records
  */
 function analyzeImportData(importRecords, existingRecords) {
     const analysis = {
@@ -754,60 +1098,64 @@ function analyzeImportData(importRecords, existingRecords) {
         invalid: []
     };
     
-    importRecords.forEach((importRecord, index) => {
-        // Validate required fields
-        if (!importRecord.accountHolder || !importRecord.bank || 
-            !importRecord.amount || !importRecord.rate || !importRecord.startDate) {
-            analysis.invalid.push({
-                record: importRecord,
-                index: index + 1,
-                reason: 'Missing required fields'
-            });
-            return;
-        }
-        
-        // Validate amount and rate
-        if (!isValidAmount(importRecord.amount) || !isValidRate(importRecord.rate)) {
-            analysis.invalid.push({
-                record: importRecord,
-                index: index + 1,
-                reason: 'Invalid amount or rate'
-            });
-            return;
-        }
-        
-        // Check for duplicates
-        const duplicate = findDuplicateRecord(importRecord, existingRecords);
-        
-        if (duplicate) {
-            // Check if there are any differences (for update detection)
-            const hasDifferences = (
-                duplicate.rate !== importRecord.rate ||
-                duplicate.duration !== importRecord.duration ||
-                duplicate.certificateStatus !== importRecord.certificateStatus ||
-                duplicate.notes !== importRecord.notes
-            );
-            
-            if (hasDifferences) {
-                analysis.updated.push({
-                    existing: duplicate,
-                    imported: importRecord,
-                    index: index + 1
-                });
-            } else {
-                analysis.duplicates.push({
+    try {
+        importRecords.forEach((importRecord, index) => {
+            // Validate required fields
+            if (!importRecord.accountHolder || !importRecord.bank || 
+                !importRecord.amount || !importRecord.rate || !importRecord.startDate) {
+                analysis.invalid.push({
                     record: importRecord,
-                    existing: duplicate,
+                    index: index + 1,
+                    reason: 'Missing required fields'
+                });
+                return;
+            }
+            
+            // Validate amount and rate
+            if (!isValidAmount(importRecord.amount) || !isValidRate(importRecord.rate)) {
+                analysis.invalid.push({
+                    record: importRecord,
+                    index: index + 1,
+                    reason: 'Invalid amount or rate'
+                });
+                return;
+            }
+            
+            // Check for duplicates
+            const duplicate = findDuplicateRecord(importRecord, existingRecords);
+            
+            if (duplicate) {
+                // Check if there are any differences (for update detection)
+                const hasDifferences = (
+                    duplicate.rate !== importRecord.rate ||
+                    duplicate.duration !== importRecord.duration ||
+                    duplicate.certificateStatus !== importRecord.certificateStatus ||
+                    duplicate.notes !== importRecord.notes
+                );
+                
+                if (hasDifferences) {
+                    analysis.updated.push({
+                        existing: duplicate,
+                        imported: importRecord,
+                        index: index + 1
+                    });
+                } else {
+                    analysis.duplicates.push({
+                        record: importRecord,
+                        existing: duplicate,
+                        index: index + 1
+                    });
+                }
+            } else {
+                analysis.newRecords.push({
+                    record: importRecord,
                     index: index + 1
                 });
             }
-        } else {
-            analysis.newRecords.push({
-                record: importRecord,
-                index: index + 1
-            });
-        }
-    });
+        });
+    } catch (error) {
+        console.error('Import analysis error:', error);
+    }
     
     return analysis;
 }
@@ -818,136 +1166,140 @@ function analyzeImportData(importRecords, existingRecords) {
 
 /**
  * Show import preview with detailed analysis
- * @param {Object} analysis - Analysis result from analyzeImportData
- * @param {Function} callback - Function to call with user choice
  */
 function showImportPreview(analysis, callback) {
-    const totalRecords = analysis.newRecords.length + analysis.duplicates.length + 
-                        analysis.updated.length + analysis.invalid.length;
-    
-    // Create modal HTML
-    const modalHtml = `
-        <div class="modal fade" id="importPreviewModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
-            <div class="modal-dialog modal-xl modal-dialog-scrollable">
-                <div class="modal-content">
-                    <div class="modal-header bg-primary text-white">
-                        <h5 class="modal-title">
-                            <i class="bi bi-file-earmark-check"></i> Import Preview & Analysis
-                        </h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <!-- Summary Cards -->
-                        <div class="row g-3 mb-4">
-                            <div class="col-md-3">
-                                <div class="card border-success">
-                                    <div class="card-body text-center">
-                                        <h3 class="text-success mb-0">${analysis.newRecords.length}</h3>
-                                        <small class="text-muted">New Records</small>
+    try {
+        const totalRecords = analysis.newRecords.length + analysis.duplicates.length + 
+                            analysis.updated.length + analysis.invalid.length;
+        
+        // Create modal HTML
+        const modalHtml = `
+            <div class="modal fade" id="importPreviewModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+                <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                    <div class="modal-content">
+                        <div class="modal-header bg-primary text-white">
+                            <h5 class="modal-title">
+                                <i class="bi bi-file-earmark-check"></i> Import Preview & Analysis
+                            </h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <!-- Summary Cards -->
+                            <div class="row g-3 mb-4">
+                                <div class="col-md-3">
+                                    <div class="card border-success">
+                                        <div class="card-body text-center">
+                                            <h3 class="text-success mb-0">${analysis.newRecords.length}</h3>
+                                            <small class="text-muted">New Records</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="card border-warning">
+                                        <div class="card-body text-center">
+                                            <h3 class="text-warning mb-0">${analysis.duplicates.length}</h3>
+                                            <small class="text-muted">Duplicates</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="card border-info">
+                                        <div class="card-body text-center">
+                                            <h3 class="text-info mb-0">${analysis.updated.length}</h3>
+                                            <small class="text-muted">Updates Available</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="card border-danger">
+                                        <div class="card-body text-center">
+                                            <h3 class="text-danger mb-0">${analysis.invalid.length}</h3>
+                                            <small class="text-muted">Invalid Records</small>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-3">
-                                <div class="card border-warning">
-                                    <div class="card-body text-center">
-                                        <h3 class="text-warning mb-0">${analysis.duplicates.length}</h3>
-                                        <small class="text-muted">Duplicates</small>
+                            
+                            <!-- Import Options -->
+                            <div class="card mb-4 border-primary">
+                                <div class="card-header bg-primary text-white">
+                                    <strong>Import Options</strong>
+                                </div>
+                                <div class="card-body">
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="radio" name="importOption" 
+                                               id="importNewOnly" value="new" checked>
+                                        <label class="form-check-label" for="importNewOnly">
+                                            <strong>Import New Only</strong> - Add only ${analysis.newRecords.length} new records (Recommended)
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="radio" name="importOption" 
+                                               id="importNewAndUpdate" value="newAndUpdate">
+                                        <label class="form-check-label" for="importNewAndUpdate">
+                                            <strong>Import New + Update Existing</strong> - Add ${analysis.newRecords.length} new + update ${analysis.updated.length} existing
+                                        </label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="radio" name="importOption" 
+                                               id="importAll" value="all">
+                                        <label class="form-check-label" for="importAll">
+                                            <strong>Import All (Including Duplicates)</strong> - Import all ${totalRecords} records
+                                        </label>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-3">
-                                <div class="card border-info">
-                                    <div class="card-body text-center">
-                                        <h3 class="text-info mb-0">${analysis.updated.length}</h3>
-                                        <small class="text-muted">Updates Available</small>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="card border-danger">
-                                    <div class="card-body text-center">
-                                        <h3 class="text-danger mb-0">${analysis.invalid.length}</h3>
-                                        <small class="text-muted">Invalid Records</small>
-                                    </div>
-                                </div>
+                            
+                            <!-- Detailed Lists -->
+                            <div class="accordion" id="importDetailsAccordion">
+                                ${generateNewRecordsSection(analysis.newRecords)}
+                                ${generateDuplicatesSection(analysis.duplicates)}
+                                ${generateUpdatesSection(analysis.updated)}
+                                ${generateInvalidSection(analysis.invalid)}
                             </div>
                         </div>
-                        
-                        <!-- Import Options -->
-                        <div class="card mb-4 border-primary">
-                            <div class="card-header bg-primary text-white">
-                                <strong>Import Options</strong>
-                            </div>
-                            <div class="card-body">
-                                <div class="form-check mb-2">
-                                    <input class="form-check-input" type="radio" name="importOption" 
-                                           id="importNewOnly" value="new" checked>
-                                    <label class="form-check-label" for="importNewOnly">
-                                        <strong>Import New Only</strong> - Add only ${analysis.newRecords.length} new records (Recommended)
-                                    </label>
-                                </div>
-                                <div class="form-check mb-2">
-                                    <input class="form-check-input" type="radio" name="importOption" 
-                                           id="importNewAndUpdate" value="newAndUpdate">
-                                    <label class="form-check-label" for="importNewAndUpdate">
-                                        <strong>Import New + Update Existing</strong> - Add ${analysis.newRecords.length} new + update ${analysis.updated.length} existing
-                                    </label>
-                                </div>
-                                <div class="form-check mb-2">
-                                    <input class="form-check-input" type="radio" name="importOption" 
-                                           id="importAll" value="all">
-                                    <label class="form-check-label" for="importAll">
-                                        <strong>Import All (Including Duplicates)</strong> - Import all ${totalRecords} records
-                                    </label>
-                                </div>
-                            </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                                <i class="bi bi-x-circle"></i> Cancel Import
+                            </button>
+                            <button type="button" class="btn btn-primary" id="confirmImportBtn">
+                                <i class="bi bi-check-circle"></i> Proceed with Import
+                            </button>
                         </div>
-                        
-                        <!-- Detailed Lists -->
-                        <div class="accordion" id="importDetailsAccordion">
-                            ${generateNewRecordsSection(analysis.newRecords)}
-                            ${generateDuplicatesSection(analysis.duplicates)}
-                            ${generateUpdatesSection(analysis.updated)}
-                            ${generateInvalidSection(analysis.invalid)}
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                            <i class="bi bi-x-circle"></i> Cancel Import
-                        </button>
-                        <button type="button" class="btn btn-primary" id="confirmImportBtn">
-                            <i class="bi bi-check-circle"></i> Proceed with Import
-                        </button>
                     </div>
                 </div>
             </div>
-        </div>
-    `;
-    
-    // Remove existing modal if present
-    const existingModal = document.getElementById('importPreviewModal');
-    if (existingModal) {
-        existingModal.remove();
+        `;
+        
+        // Remove existing modal if present
+        const existingModal = document.getElementById('importPreviewModal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+        
+        // Add modal to body
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('importPreviewModal'));
+        modal.show();
+        
+        // Handle confirm button
+        document.getElementById('confirmImportBtn').addEventListener('click', function() {
+            const selectedOption = document.querySelector('input[name="importOption"]:checked').value;
+            modal.hide();
+            callback(selectedOption, analysis);
+        });
+        
+        // Cleanup on modal close
+        document.getElementById('importPreviewModal').addEventListener('hidden.bs.modal', function() {
+            this.remove();
+        });
+        
+    } catch (error) {
+        console.error('Import preview error:', error);
+        showToast('Error showing import preview', 'error');
     }
-    
-    // Add modal to body
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
-    // Show modal
-    const modal = new bootstrap.Modal(document.getElementById('importPreviewModal'));
-    modal.show();
-    
-    // Handle confirm button
-    document.getElementById('confirmImportBtn').addEventListener('click', function() {
-        const selectedOption = document.querySelector('input[name="importOption"]:checked').value;
-        modal.hide();
-        callback(selectedOption, analysis);
-    });
-    
-    // Cleanup on modal close
-    document.getElementById('importPreviewModal').addEventListener('hidden.bs.modal', function() {
-        this.remove();
-    });
 }
 
 /**
@@ -970,8 +1322,8 @@ function generateNewRecordsSection(newRecords) {
     const recordsList = newRecords.map(item => `
         <tr>
             <td>${item.index}</td>
-            <td>${item.record.accountHolder}</td>
-            <td>${item.record.bank}</td>
+            <td>${escapeHtml(item.record.accountHolder)}</td>
+            <td>${escapeHtml(item.record.bank)}</td>
             <td>${formatCurrency(item.record.amount)}</td>
             <td>${item.record.rate}%</td>
             <td>${formatDate(item.record.startDate)}</td>
@@ -1032,8 +1384,8 @@ function generateDuplicatesSection(duplicates) {
     const recordsList = duplicates.map(item => `
         <tr>
             <td>${item.index}</td>
-            <td>${item.record.accountHolder}</td>
-            <td>${item.record.bank}</td>
+            <td>${escapeHtml(item.record.accountHolder)}</td>
+            <td>${escapeHtml(item.record.bank)}</td>
             <td>${formatCurrency(item.record.amount)}</td>
             <td>${item.record.rate}%</td>
             <td>${formatDate(item.record.startDate)}</td>
@@ -1114,8 +1466,8 @@ function generateUpdatesSection(updates) {
         return `
             <tr>
                 <td>${item.index}</td>
-                <td>${item.imported.accountHolder}</td>
-                <td>${item.imported.bank}</td>
+                <td>${escapeHtml(item.imported.accountHolder)}</td>
+                <td>${escapeHtml(item.imported.bank)}</td>
                 <td>${formatCurrency(item.imported.amount)}</td>
                 <td><small>${changes.join(', ')}</small></td>
             </tr>
@@ -1178,10 +1530,10 @@ function generateInvalidSection(invalid) {
     const recordsList = invalid.map(item => `
         <tr>
             <td>${item.index}</td>
-            <td>${item.record.accountHolder || 'N/A'}</td>
-            <td>${item.record.bank || 'N/A'}</td>
+            <td>${escapeHtml(item.record.accountHolder || 'N/A')}</td>
+            <td>${escapeHtml(item.record.bank || 'N/A')}</td>
             <td>${item.record.amount || 'N/A'}</td>
-            <td><span class="badge bg-danger">${item.reason}</span></td>
+            <td><span class="badge bg-danger">${escapeHtml(item.reason)}</span></td>
         </tr>
     `).join('');
     
@@ -1229,71 +1581,82 @@ function generateInvalidSection(invalid) {
  * Handle CSV import with duplicate detection and preview
  */
 function handleBulkCSVImportSmart() {
-    const fileInput = document.getElementById('bulkCSVImportFile');
-    const file = fileInput.files[0];
-    
-    if (!file) {
-        showToast('Please select a CSV file', 'warning');
-        return;
-    }
-    
-    const reader = new FileReader();
-    
-    reader.onload = function(e) {
-        try {
-            const csvText = e.target.result;
-            const csvRecords = parseCSV(csvText);
-            
-            if (csvRecords.length === 0) {
-                showToast('CSV file is empty or invalid', 'error');
-                fileInput.value = '';
-                return;
-            }
-            
-            // Get existing records
-            const existingRecords = getData('fd_records') || [];
-            
-            // Prepare import records - FLEXIBLE HEADER MAPPING
-            const importRecords = csvRecords.map(csvRecord => {
-                // Normalize all keys to lowercase for flexible matching
-                const normalized = {};
-                Object.keys(csvRecord).forEach(key => {
-                    normalized[key.toLowerCase().replace(/\s+/g, '')] = csvRecord[key];
+    try {
+        if (!pinHash) {
+            showToast('Please log in first', 'error');
+            return;
+        }
+        
+        const fileInput = document.getElementById('bulkCSVImportFile');
+        const file = fileInput?.files[0];
+        
+        if (!file) {
+            showToast('Please select a CSV file', 'warning');
+            return;
+        }
+        
+        const reader = new FileReader();
+        
+        reader.onload = function(e) {
+            try {
+                const csvText = e.target.result;
+                const csvRecords = parseCSV(csvText);
+                
+                if (csvRecords.length === 0) {
+                    showToast('CSV file is empty or invalid', 'error');
+                    fileInput.value = '';
+                    return;
+                }
+                
+                // Get existing records
+                const existingRecords = getData('fd_records') || [];
+                
+                // Prepare import records - FLEXIBLE HEADER MAPPING
+                const importRecords = csvRecords.map(csvRecord => {
+                    // Normalize all keys to lowercase for flexible matching
+                    const normalized = {};
+                    Object.keys(csvRecord).forEach(key => {
+                        normalized[key.toLowerCase().replace(/\s+/g, '')] = csvRecord[key];
+                    });
+                    
+                    const holderName = (normalized.accountholder || '').trim();
+                    
+                    return {
+                        accountHolder: holderName,
+                        bank: (normalized.bank || '').trim(),
+                        amount: parseFloat(normalized.amount) || 0,
+                        duration: parseInt(normalized.duration) || 12,
+                        durationUnit: normalized.unit || normalized.durationunit || 'Months',
+                        rate: parseFloat(normalized.rate || normalized.interestrate) || 0,
+                        startDate: normalized.startdate || '',
+                        maturityDate: normalized.maturitydate || '',
+                        certificateStatus: normalized.certificatestatus || 'Not Obtained',
+                        notes: normalized.notes || ''
+                    };
                 });
                 
-                const holderName = (normalized.accountholder || '').trim();
+                // Analyze import data
+                const analysis = analyzeImportData(importRecords, existingRecords);
                 
-                return {
-                    accountHolder: holderName,
-                    bank: (normalized.bank || '').trim(),
-                    amount: parseFloat(normalized.amount) || 0,
-                    duration: parseInt(normalized.duration) || 12,
-                    durationUnit: normalized.unit || normalized.durationunit || 'Months',
-                    rate: parseFloat(normalized.rate || normalized.interestrate) || 0,
-                    startDate: normalized.startdate || '',
-                    maturityDate: normalized.maturitydate || '',
-                    certificateStatus: normalized.certificatestatus || 'Not Obtained',
-                    notes: normalized.notes || ''
-                };
-            });
-            
-            // Analyze import data
-            const analysis = analyzeImportData(importRecords, existingRecords);
-            
-            // Show preview dialog
-            showImportPreview(analysis, function(selectedOption, analysisData) {
-                processSmartImport(selectedOption, analysisData, fileInput);
-            });
-            
-        } catch (error) {
-            console.error('CSV import error:', error);
-            showToast('Error reading CSV file. Please check file format.', 'error');
-            fileInput.value = '';
-        }
-    };
-    
-    reader.readAsText(file);
+                // Show preview dialog
+                showImportPreview(analysis, function(selectedOption, analysisData) {
+                    processSmartImport(selectedOption, analysisData, fileInput);
+                });
+                
+            } catch (error) {
+                console.error('CSV import error:', error);
+                showToast('Error reading CSV file. Please check file format.', 'error');
+                fileInput.value = '';
+            }
+        };
+        
+        reader.readAsText(file);
+    } catch (error) {
+        console.error('Handle CSV import error:', error);
+        showToast('Error handling CSV import', 'error');
+    }
 }
+
 /**
  * Process import based on user selection
  */
@@ -1374,10 +1737,10 @@ function processSmartImport(option, analysis, fileInput) {
         saveData('fd_account_holders', holders);
         saveData('fd_records', records);
         
-        // Refresh UI
-        loadAccountHolders();
-        loadFDRecords();
-        updateDashboard();
+        // Refresh UI if functions exist
+        if (typeof loadAccountHolders === 'function') loadAccountHolders();
+        if (typeof loadFDRecords === 'function') loadFDRecords();
+        if (typeof updateDashboard === 'function') updateDashboard();
         updateAnalytics();
         loadCertificates();
         
@@ -1411,31 +1774,36 @@ function processSmartImport(option, analysis, fileInput) {
  * Prepare record for import with all necessary fields
  */
 function prepareRecordForImport(record) {
-    const fdRecord = {
-        id: generateId(),
-        accountHolder: record.accountHolder,
-        bank: record.bank,
-        amount: parseFloat(record.amount),
-        duration: parseInt(record.duration),
-        durationUnit: record.durationUnit,
-        rate: parseFloat(record.rate),
-        startDate: record.startDate,
-        maturityDate: record.maturityDate,
-        certificateStatus: record.certificateStatus,
-        notes: record.notes,
-        createdAt: new Date().toISOString()
-    };
-    
-    // Calculate maturity date if not provided
-    if (!fdRecord.maturityDate && fdRecord.startDate && fdRecord.duration) {
-        fdRecord.maturityDate = calculateMaturityDate(
-            fdRecord.startDate,
-            fdRecord.duration,
-            fdRecord.durationUnit
-        );
+    try {
+        const fdRecord = {
+            id: generateId(),
+            accountHolder: record.accountHolder,
+            bank: record.bank,
+            amount: parseFloat(record.amount),
+            duration: parseInt(record.duration),
+            durationUnit: record.durationUnit,
+            rate: parseFloat(record.rate),
+            startDate: record.startDate,
+            maturityDate: record.maturityDate,
+            certificateStatus: record.certificateStatus,
+            notes: record.notes,
+            createdAt: new Date().toISOString()
+        };
+        
+        // Calculate maturity date if not provided
+        if (!fdRecord.maturityDate && fdRecord.startDate && fdRecord.duration) {
+            fdRecord.maturityDate = calculateMaturityDate(
+                fdRecord.startDate,
+                fdRecord.duration,
+                fdRecord.durationUnit
+            );
+        }
+        
+        return fdRecord;
+    } catch (error) {
+        console.error('Prepare record for import error:', error);
+        return record;
     }
-    
-    return fdRecord;
 }
 
 // ===================================
@@ -1446,44 +1814,54 @@ function prepareRecordForImport(record) {
  * Restore backup with duplicate detection
  */
 function restoreDataSmart() {
-    const fileInput = document.getElementById('restoreFile');
-    const file = fileInput.files[0];
-    
-    if (!file) {
-        showToast('Please select a backup file', 'warning');
-        return;
-    }
-    
-    const reader = new FileReader();
-    
-    reader.onload = function(e) {
-        try {
-            const data = JSON.parse(e.target.result);
-            
-            // Validate backup file
-            if (!data.version || !data.records) {
-                throw new Error('Invalid backup file format');
-            }
-            
-            const importRecords = data.records || [];
-            const existingRecords = getData('fd_records') || [];
-            
-            // Analyze import data
-            const analysis = analyzeImportData(importRecords, existingRecords);
-            
-            // Show preview dialog
-            showImportPreview(analysis, function(selectedOption, analysisData) {
-                processSmartRestore(selectedOption, analysisData, data, fileInput);
-            });
-            
-        } catch (error) {
-            console.error('Restore error:', error);
-            showToast('Invalid backup file. Please check the file format.', 'error');
-            fileInput.value = '';
+    try {
+        if (!pinHash) {
+            showToast('Please log in first', 'error');
+            return;
         }
-    };
-    
-    reader.readAsText(file);
+        
+        const fileInput = document.getElementById('restoreFile');
+        const file = fileInput?.files[0];
+        
+        if (!file) {
+            showToast('Please select a backup file', 'warning');
+            return;
+        }
+        
+        const reader = new FileReader();
+        
+        reader.onload = function(e) {
+            try {
+                const data = JSON.parse(e.target.result);
+                
+                // Validate backup file
+                if (!data.version || !data.records) {
+                    throw new Error('Invalid backup file format');
+                }
+                
+                const importRecords = data.records || [];
+                const existingRecords = getData('fd_records') || [];
+                
+                // Analyze import data
+                const analysis = analyzeImportData(importRecords, existingRecords);
+                
+                // Show preview dialog
+                showImportPreview(analysis, function(selectedOption, analysisData) {
+                    processSmartRestore(selectedOption, analysisData, data, fileInput);
+                });
+                
+            } catch (error) {
+                console.error('Restore error:', error);
+                showToast('Invalid backup file. Please check the file format.', 'error');
+                fileInput.value = '';
+            }
+        };
+        
+        reader.readAsText(file);
+    } catch (error) {
+        console.error('Restore data smart error:', error);
+        showToast('Error handling backup restore', 'error');
+    }
 }
 
 /**
@@ -1585,211 +1963,87 @@ function processSmartRestore(option, analysis, backupData, fileInput) {
     }
 }
 
-// Keep existing export functions unchanged
-// ... (exportAllPDF, exportToExcel, exportAllToCSV, backupData, clearAllData, etc
+// ===================================
+// Clear All Data Function
+// ===================================
 
 function clearAllData() {
-    const confirmation = prompt('⚠️ WARNING: This will delete ALL FD data!\n\nType "DELETE" to confirm:');
-    
-    if (confirmation !== 'DELETE') {
-        showToast('Clear data cancelled', 'info');
-        return;
-    }
-    
-    // Final confirmation
-    const finalConfirm = confirm('This is your LAST CHANCE!\n\nProceed with deleting ALL data?');
-    
-    if (!finalConfirm) {
-        showToast('Clear data cancelled', 'info');
-        return;
-    }
-    
-    saveData('fd_account_holders', []);
-    saveData('fd_records', []);
-    saveData('fd_templates', []);
-    
-    showToast('All data cleared successfully', 'success');
-    
-    setTimeout(() => {
-        location.reload();
-    }, 1000);
-}
-
-// ===================================
-// Interest Calculator Functions
-// ===================================
-
-function performCalculation() {
-    const principal = parseFloat(document.getElementById('calcPrincipal').value);
-    const rate = parseFloat(document.getElementById('calcRate').value);
-    const duration = parseInt(document.getElementById('calcDuration').value);
-    const unit = document.getElementById('calcUnit').value;
-    const frequency = parseInt(document.getElementById('calcFrequency').value);
-    
-    // Validation
-    if (!principal || principal <= 0) {
-        showToast('Please enter valid principal amount', 'error');
-        return;
-    }
-    
-    if (!rate || rate <= 0) {
-        showToast('Please enter valid interest rate', 'error');
-        return;
-    }
-    
-    if (!duration || duration <= 0) {
-        showToast('Please enter valid duration', 'error');
-        return;
-    }
-    
-    // Calculate
-    const months = getDurationInMonths(duration, unit);
-    
-    const simpleInterest = calculateSimpleInterest(principal, rate, months);
-    const compoundInterest = calculateCompoundInterest(principal, rate, months, frequency);
-    const maturityAmount = principal + compoundInterest;
-    
-    // Get frequency name
-    const frequencyNames = {
-        '4': 'Quarterly',
-        '12': 'Monthly',
-        '1': 'Annually',
-        '365': 'Daily',
-        '0': 'At Maturity (Simple)'
-    };
-    
-    // Display results
-    document.getElementById('resultPrincipal').textContent = formatCurrency(principal);
-    document.getElementById('resultRate').textContent = rate + '% p.a.';
-    document.getElementById('resultDuration').textContent = duration + ' ' + unit;
-    document.getElementById('resultFrequency').textContent = frequencyNames[frequency];
-    document.getElementById('resultSimple').textContent = formatCurrency(simpleInterest);
-    document.getElementById('resultCompound').textContent = formatCurrency(compoundInterest);
-    document.getElementById('resultMaturity').textContent = formatCurrency(maturityAmount);
-    
-    // Show results
-    document.getElementById('calcResults').style.display = 'block';
-    document.getElementById('noCalcResults').style.display = 'none';
-    
-    // Show comparison chart
-    showInterestComparison(principal, simpleInterest, compoundInterest);
-    
-    // Success message
-    showToast('Calculation completed successfully!', 'success');
-}
-
-function setCalcPreset(amount, rate, duration, unit) {
-    document.getElementById('calcPrincipal').value = amount;
-    document.getElementById('calcRate').value = rate;
-    document.getElementById('calcDuration').value = duration;
-    document.getElementById('calcUnit').value = unit;
-    
-    showToast('Preset values loaded. Click Calculate to see results.', 'info');
-}
-
-function showInterestComparison(principal, simpleInterest, compoundInterest) {
-    const comparisonCard = document.getElementById('comparisonCard');
-    const canvas = document.getElementById('interestComparisonChart');
-    
-    if (!canvas) return;
-    
-    comparisonCard.style.display = 'block';
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Destroy existing chart
-    if (window.interestComparisonChart) {
-        window.interestComparisonChart.destroy();
-    }
-    
-    window.interestComparisonChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: ['Principal', 'Simple Interest', 'Compound Interest'],
-            datasets: [{
-                label: 'Amount (NRs)',
-                data: [principal, simpleInterest, compoundInterest],
-                backgroundColor: [
-                    'rgba(13, 110, 253, 0.7)',
-                    'rgba(255, 193, 7, 0.7)',
-                    'rgba(25, 135, 84, 0.7)'
-                ],
-                borderColor: [
-                    'rgb(13, 110, 253)',
-                    'rgb(255, 193, 7)',
-                    'rgb(25, 135, 84)'
-                ],
-                borderWidth: 2
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return formatCurrency(context.parsed.y);
-                        }
-                    }
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return formatCurrency(value);
-                        }
-                    }
-                }
-            }
+    try {
+        if (!pinHash) {
+            showToast('Please log in first', 'error');
+            return;
         }
-    });
+        
+        const confirmation = prompt('⚠️ WARNING: This will delete ALL FD data!\n\nType "DELETE" to confirm:');
+        
+        if (confirmation !== 'DELETE') {
+            showToast('Clear data cancelled', 'info');
+            return;
+        }
+        
+        // Final confirmation
+        const finalConfirm = confirm('This is your LAST CHANCE!\n\nProceed with deleting ALL data?');
+        
+        if (!finalConfirm) {
+            showToast('Clear data cancelled', 'info');
+            return;
+        }
+        
+        saveData('fd_account_holders', []);
+        saveData('fd_records', []);
+        saveData('fd_templates', []);
+        
+        showToast('All data cleared successfully', 'success');
+        
+        setTimeout(() => {
+            location.reload();
+        }, 1000);
+    } catch (error) {
+        console.error('Clear all data error:', error);
+        showToast('Error clearing data', 'error');
+    }
 }
 
-function printCalculation() {
-    const principal = document.getElementById('resultPrincipal').textContent;
-    const rate = document.getElementById('resultRate').textContent;
-    const duration = document.getElementById('resultDuration').textContent;
-    const simple = document.getElementById('resultSimple').textContent;
-    const compound = document.getElementById('resultCompound').textContent;
-    const maturity = document.getElementById('resultMaturity').textContent;
-    
-    const printWindow = window.open('', '', 'height=600,width=800');
-    printWindow.document.write('<html><head><title>FD Interest Calculation</title>');
-    printWindow.document.write('<style>');
-    printWindow.document.write('body { font-family: Arial, sans-serif; padding: 20px; }');
-    printWindow.document.write('h2 { color: #0d6efd; }');
-    printWindow.document.write('table { width: 100%; border-collapse: collapse; margin: 20px 0; }');
-    printWindow.document.write('th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }');
-    printWindow.document.write('th { background-color: #f8f9fa; }');
-    printWindow.document.write('.highlight { background-color: #fff3cd; font-weight: bold; }');
-    printWindow.document.write('</style></head><body>');
-    printWindow.document.write('<h2>FD Manager Pro - Interest Calculation</h2>');
-    printWindow.document.write('<p>Generated on: ' + new Date().toLocaleDateString() + '</p>');
-    printWindow.document.write('<table>');
-    printWindow.document.write('<tr><th>Description</th><th>Value</th></tr>');
-    printWindow.document.write('<tr><td>Principal Amount</td><td>' + principal + '</td></tr>');
-    printWindow.document.write('<tr><td>Interest Rate</td><td>' + rate + '</td></tr>');
-    printWindow.document.write('<tr><td>Duration</td><td>' + duration + '</td></tr>');
-    printWindow.document.write('<tr><td>Simple Interest</td><td>' + simple + '</td></tr>');
-    printWindow.document.write('<tr><td>Compound Interest</td><td>' + compound + '</td></tr>');
-    printWindow.document.write('<tr class="highlight"><td>Total Maturity Amount</td><td>' + maturity + '</td></tr>');
-    printWindow.document.write('</table>');
-    printWindow.document.write('<p><small>Note: This is an estimate. Actual returns may vary.</small></p>');
-    printWindow.document.write('</body></html>');
-    printWindow.document.close();
-    printWindow.print();
-}
+// ===================================
+// Global Error Handler for Charts
+// ===================================
 
-// Backward compatibility
-function calculateInterest() {
-    performCalculation();
-}
+// Add global error handler for chart-related errors
+window.addEventListener('error', function(event) {
+    if (event.error && event.error.message && 
+        (event.error.message.includes('destroy') || event.error.message.includes('chart'))) {
+        console.warn('Chart error handled globally:', event.error.message);
+        event.preventDefault(); // Prevent the error from breaking the app
+        return false;
+    }
+});
+
+// ===================================
+// Initialize
+// ===================================
+
+// Safe initialization
+document.addEventListener('DOMContentLoaded', function() {
+    try {
+        // Wait a bit for other modules to load
+        setTimeout(() => {
+            // Only load if PIN is available
+            if (pinHash) {
+                displayCalculationHistory();
+            } else {
+                console.log('Waiting for PIN initialization...');
+                // Try again after another delay
+                setTimeout(() => {
+                    if (pinHash) {
+                        displayCalculationHistory();
+                    }
+                }, 3000);
+            }
+        }, 2000);
+    } catch (error) {
+        console.error('App-part3 initialization error:', error);
+    }
+});
 
 console.log('[FD Manager Nepal] Import functions loaded - ADD ONLY mode available');
 console.log('[FD Manager Nepal] App-part3.js loaded successfully');

@@ -1,7 +1,7 @@
 // ===================================
 // FD Manager Pro - Main Application
 // Part 1: Core & Authentication
-// Nepal Edition - Version 4.0
+// Nepal Edition - Version 4.0 (Corrected)
 // ===================================
 
 // ===================================
@@ -21,21 +21,29 @@ document.addEventListener('DOMContentLoaded', function() {
 function checkLogin() {
     const savedPin = localStorage.getItem('fd_pin');
     
+    const loginForm = document.getElementById('loginForm');
+    const setupForm = document.getElementById('setupForm');
+    const loginScreen = document.getElementById('loginScreen');
+    const mainApp = document.getElementById('mainApp');
+    
     if (!savedPin) {
-        document.getElementById('loginForm').style.display = 'none';
-        document.getElementById('setupForm').style.display = 'block';
+        if (loginForm) loginForm.style.display = 'none';
+        if (setupForm) setupForm.style.display = 'block';
     } else {
-        document.getElementById('loginForm').style.display = 'block';
-        document.getElementById('setupForm').style.display = 'none';
+        if (loginForm) loginForm.style.display = 'block';
+        if (setupForm) setupForm.style.display = 'none';
     }
     
-    document.getElementById('loginScreen').style.display = 'flex';
-    document.getElementById('mainApp').style.display = 'none';
+    if (loginScreen) loginScreen.style.display = 'flex';
+    if (mainApp) mainApp.style.display = 'none';
 }
 
 function setupPin() {
-    const pin = document.getElementById('setupPin').value;
-    const confirmPin = document.getElementById('confirmPin').value;
+    const pinInput = document.getElementById('setupPin');
+    const confirmInput = document.getElementById('confirmPin');
+    
+    const pin = pinInput?.value || '';
+    const confirmPin = confirmInput?.value || '';
     
     if (!isValidPIN(pin)) {
         showToast('PIN must be exactly 4 digits', 'error');
@@ -53,6 +61,7 @@ function setupPin() {
     
     showToast('PIN created successfully!', 'success');
     
+    // Initialize empty data
     saveData('fd_account_holders', []);
     saveData('fd_records', []);
     saveData('fd_templates', []);
@@ -60,14 +69,19 @@ function setupPin() {
     saveData('fd_calculations', []);
     
     setTimeout(() => {
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('mainApp').style.display = 'block';
+        const loginScreen = document.getElementById('loginScreen');
+        const mainApp = document.getElementById('mainApp');
+        
+        if (loginScreen) loginScreen.style.display = 'none';
+        if (mainApp) mainApp.style.display = 'block';
+        
         initializeApp();
     }, 500);
 }
 
 function login() {
-    const pin = document.getElementById('loginPin').value;
+    const pinInput = document.getElementById('loginPin');
+    const pin = pinInput?.value || '';
     
     if (!isValidPIN(pin)) {
         showToast('Invalid PIN format', 'error');
@@ -79,14 +93,17 @@ function login() {
     
     if (hash !== savedHash) {
         showToast('Incorrect PIN', 'error');
-        document.getElementById('loginPin').value = '';
+        if (pinInput) pinInput.value = '';
         return;
     }
     
     pinHash = hash;
     
-    document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('mainApp').style.display = 'block';
+    const loginScreen = document.getElementById('loginScreen');
+    const mainApp = document.getElementById('mainApp');
+    
+    if (loginScreen) loginScreen.style.display = 'none';
+    if (mainApp) mainApp.style.display = 'block';
     
     initializeApp();
 }
@@ -95,8 +112,12 @@ function logout() {
     if (confirm('Are you sure you want to logout?')) {
         pinHash = '';
         currentEditId = null;
-        document.getElementById('loginPin').value = '';
+        
+        const loginPin = document.getElementById('loginPin');
+        if (loginPin) loginPin.value = '';
+        
         checkLogin();
+        showToast('Logged out successfully', 'info');
     }
 }
 
@@ -109,6 +130,8 @@ function showResetConfirm() {
         setTimeout(() => {
             location.reload();
         }, 1000);
+    } else {
+        showToast('Reset cancelled', 'info');
     }
 }
 
@@ -117,35 +140,86 @@ function showResetConfirm() {
 // ===================================
 
 function initializeApp() {
-    loadAccountHolders();
-    loadFDRecords();
-    loadTemplates();
-    updateDashboard();
-    updateAnalytics();
-    populateSettings();
-    
-    showToast('Welcome to FD Manager Pro - Nepal Edition!', 'success');
+    try {
+        loadAccountHolders();
+        loadFDRecords();
+        loadTemplates();
+        updateDashboard();
+        updateAnalytics();
+        populateSettings();
+        
+        // Load certificates if function exists
+        if (typeof loadCertificates === 'function') {
+            loadCertificates();
+        }
+        
+        showToast('Welcome to FD Manager Pro - Nepal Edition!', 'success');
+    } catch (error) {
+        console.error('App initialization error:', error);
+        showToast('Error loading data. Please refresh.', 'error');
+    }
 }
 
 function initializeEventListeners() {
-    document.getElementById('loginPin')?.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') login();
-    });
+    // Login form keyboard navigation
+    const loginPin = document.getElementById('loginPin');
+    if (loginPin) {
+        loginPin.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') login();
+        });
+    }
     
-    document.getElementById('setupPin')?.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') document.getElementById('confirmPin').focus();
-    });
+    const setupPin = document.getElementById('setupPin');
+    if (setupPin) {
+        setupPin.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                const confirmPin = document.getElementById('confirmPin');
+                if (confirmPin) confirmPin.focus();
+            }
+        });
+    }
     
-    document.getElementById('confirmPin')?.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') setupPin();
-    });
+    const confirmPin = document.getElementById('confirmPin');
+    if (confirmPin) {
+        confirmPin.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') window.setupPin();
+        });
+    }
     
+    // Bank autocomplete
     setupBankAutocomplete();
     
+    // Search with debounce
     const searchInput = document.getElementById('searchRecords');
     if (searchInput) {
         searchInput.addEventListener('input', debounce(filterRecords, 300));
     }
+    
+    // Form auto-save
+    setupFormAutoSave();
+}
+
+/**
+ * Setup form auto-save listeners
+ */
+function setupFormAutoSave() {
+    const formFields = [
+        'fdAccountHolder', 'fdBank', 'fdAmount', 'fdDuration',
+        'fdDurationUnit', 'fdRate', 'fdStartDate', 'fdCertStatus',
+        'fdNumber', 'fdNotes'
+    ];
+    
+    formFields.forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (field) {
+            field.addEventListener('change', () => {
+                if (typeof saveDraft === 'function') saveDraft();
+            });
+            field.addEventListener('input', debounce(() => {
+                if (typeof saveDraft === 'function') saveDraft();
+            }, 500));
+        }
+    });
 }
 
 // ===================================
@@ -176,7 +250,10 @@ function loadAccountHolders() {
                 select.appendChild(option);
             });
             
-            select.value = currentValue;
+            // Restore previous selection if valid
+            if (currentValue && holders.includes(currentValue)) {
+                select.value = currentValue;
+            }
         }
     });
     
@@ -187,26 +264,38 @@ function updateAccountHoldersList(holders) {
     const container = document.getElementById('accountHoldersList');
     if (!container) return;
     
-    if (holders.length === 0) {
+    if (!holders || holders.length === 0) {
         container.innerHTML = '<p class="text-muted">No account holders added yet</p>';
         return;
     }
     
-    container.innerHTML = holders.map(holder => `
-        <div class="account-holder-item">
-            <span><i class="bi bi-person-fill"></i> ${holder}</span>
-            <button class="btn btn-sm btn-outline-danger" onclick="deleteAccountHolder('${holder}')">
-                <i class="bi bi-trash"></i>
-            </button>
-        </div>
-    `).join('');
+    // Clear container and build safely
+    container.innerHTML = '';
+    
+    holders.forEach(holder => {
+        const div = document.createElement('div');
+        div.className = 'account-holder-item';
+        
+        const span = document.createElement('span');
+        span.innerHTML = '<i class="bi bi-person-fill"></i> ';
+        span.appendChild(document.createTextNode(holder));
+        
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-sm btn-outline-danger';
+        btn.innerHTML = '<i class="bi bi-trash"></i>';
+        btn.onclick = () => deleteAccountHolder(holder);
+        
+        div.appendChild(span);
+        div.appendChild(btn);
+        container.appendChild(div);
+    });
 }
 
 function addAccountHolder(event) {
-    event.preventDefault();
+    if (event) event.preventDefault();
     
     const input = document.getElementById('newAccountHolder');
-    const name = input.value.trim();
+    const name = input?.value?.trim();
     
     if (!name) {
         showToast('Please enter a name', 'error');
@@ -215,7 +304,8 @@ function addAccountHolder(event) {
     
     const holders = getData('fd_account_holders') || [];
     
-    if (holders.includes(name)) {
+    // Case-insensitive duplicate check
+    if (holders.some(h => h.toLowerCase() === name.toLowerCase())) {
         showToast('Account holder already exists', 'error');
         return;
     }
@@ -224,7 +314,7 @@ function addAccountHolder(event) {
     saveData('fd_account_holders', holders);
     
     loadAccountHolders();
-    input.value = '';
+    if (input) input.value = '';
     
     showToast(`Account holder "${name}" added successfully`, 'success');
 }
@@ -239,6 +329,7 @@ function deleteAccountHolder(name) {
     saveData('fd_account_holders', holders);
     
     let records = getData('fd_records') || [];
+    const deletedCount = records.filter(r => r.accountHolder === name).length;
     records = records.filter(r => r.accountHolder !== name);
     saveData('fd_records', records);
     
@@ -246,7 +337,7 @@ function deleteAccountHolder(name) {
     loadFDRecords();
     updateDashboard();
     
-    showToast(`Account holder "${name}" deleted`, 'success');
+    showToast(`Account holder "${name}" deleted (${deletedCount} records removed)`, 'success');
 }
 
 // ===================================
@@ -262,12 +353,17 @@ function displayFDRecords(records) {
     const tbody = document.getElementById('recordsTableBody');
     if (!tbody) return;
     
-    if (records.length === 0) {
+    if (!records || records.length === 0) {
         tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted">No records found</td></tr>';
         return;
     }
     
     records = applyRecordFilters(records);
+    
+    if (records.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted">No matching records found</td></tr>';
+        return;
+    }
     
     tbody.innerHTML = records.map(record => {
         const maturityDate = record.maturityDate || calculateMaturityDate(
@@ -277,25 +373,32 @@ function displayFDRecords(records) {
         const daysRemaining = calculateDaysRemaining(maturityDate);
         const status = getRecordStatus(daysRemaining);
         const interest = calculateInterestForRecord(record);
+        const displayDays = daysRemaining !== null && daysRemaining > 0 ? daysRemaining : '0';
+        
+        // Escape all user-provided data
+        const safeId = escapeHtml(record.id);
+        const safeHolder = escapeHtml(record.accountHolder);
+        const safeBank = escapeHtml(record.bank);
+        const safeUnit = escapeHtml(record.durationUnit);
         
         return `
             <tr>
-                <td><input type="checkbox" class="record-checkbox" value="${record.id}" onchange="updateSelectAllState()"></td>
-                <td>${record.accountHolder}</td>
-                <td>${record.bank}</td>
+                <td><input type="checkbox" class="record-checkbox" value="${safeId}" onchange="updateSelectAllState()"></td>
+                <td>${safeHolder}</td>
+                <td>${safeBank}</td>
                 <td>${formatCurrency(record.amount)}</td>
-                <td>${record.duration} ${record.durationUnit}</td>
+                <td>${record.duration} ${safeUnit}</td>
                 <td>${record.rate}%</td>
                 <td>${formatDate(record.startDate)}</td>
                 <td>${formatDate(maturityDate)}</td>
-                <td>${daysRemaining > 0 ? daysRemaining : '0'}</td>
+                <td>${displayDays}</td>
                 <td>${formatCurrency(interest)}</td>
                 <td><span class="${getStatusBadgeClass(status)}">${status}</span></td>
                 <td>
-                    <button class="btn btn-sm btn-primary" onclick="editFD('${record.id}')" title="Edit">
+                    <button class="btn btn-sm btn-primary" onclick="editFD('${safeId}')" title="Edit">
                         <i class="bi bi-pencil-fill"></i>
                     </button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteFD('${record.id}')" title="Delete">
+                    <button class="btn btn-sm btn-danger" onclick="deleteFD('${safeId}')" title="Delete">
                         <i class="bi bi-trash-fill"></i>
                     </button>
                 </td>
@@ -305,11 +408,15 @@ function displayFDRecords(records) {
 }
 
 function applyRecordFilters(records) {
+    if (!records) return [];
+    
+    // Apply search filter
     const searchQuery = document.getElementById('searchRecords')?.value;
     if (searchQuery) {
         records = searchRecords(records, searchQuery);
     }
     
+    // Apply status filter
     if (recordFilter !== 'all') {
         records = records.filter(record => {
             const maturityDate = record.maturityDate || calculateMaturityDate(
@@ -334,13 +441,17 @@ function applyRecordFilters(records) {
     return records;
 }
 
-function setRecordFilter(filter) {
+function setRecordFilter(filter, event) {
     recordFilter = filter;
     
+    // Update button states
     document.querySelectorAll('.btn-group button').forEach(btn => {
         btn.classList.remove('active');
     });
-    event.target.classList.add('active');
+    
+    if (event && event.target) {
+        event.target.classList.add('active');
+    }
     
     loadFDRecords();
 }
@@ -349,158 +460,255 @@ function filterRecords() {
     loadFDRecords();
 }
 
+/**
+ * Save FD record (handles both add and edit)
+ */
 function saveFD(event) {
-    event.preventDefault();
+    if (event) event.preventDefault();
     
-    const accountHolder = document.getElementById('fdAccountHolder').value;
-    const bank = document.getElementById('fdBank').value;
-    const amount = parseFloat(document.getElementById('fdAmount').value);
-    const duration = parseInt(document.getElementById('fdDuration').value);
-    const durationUnit = document.getElementById('fdDurationUnit').value;
-    const rate = parseFloat(document.getElementById('fdRate').value);
-    const startDate = document.getElementById('fdStartDate').value;
-    const certStatus = document.getElementById('fdCertStatus').value;
-    const fdNumber = document.getElementById('fdNumber').value;
-    const notes = document.getElementById('fdNotes').value;
+    // Get form values
+    const accountHolder = document.getElementById('fdAccountHolder')?.value;
+    const bank = document.getElementById('fdBank')?.value;
+    const amount = parseFloat(document.getElementById('fdAmount')?.value);
+    const duration = parseInt(document.getElementById('fdDuration')?.value);
+    const durationUnit = document.getElementById('fdDurationUnit')?.value || 'Months';
+    const rate = parseFloat(document.getElementById('fdRate')?.value);
+    const startDate = document.getElementById('fdStartDate')?.value;
+    const certStatus = document.getElementById('fdCertStatus')?.value || 'Not Obtained';
+    const fdNumber = document.getElementById('fdNumber')?.value || '';
+    const notes = document.getElementById('fdNotes')?.value || '';
     
+    // Validation
     if (!accountHolder) {
         showToast('Please select an account holder', 'error');
-        return false;
+        return;
     }
     
     if (!bank || !amount || !duration || !rate || !startDate) {
         showToast('Please fill all required fields', 'error');
-        return false;
+        return;
     }
     
-    if (!isValidAmount(amount) || !isValidRate(rate)) {
-        showToast('Please enter valid amount and rate', 'error');
-        return false;
+    if (!isValidAmount(amount)) {
+        showToast('Please enter a valid amount', 'error');
+        return;
+    }
+    
+    if (!isValidRate(rate)) {
+        showToast('Please enter a valid interest rate (0-100)', 'error');
+        return;
+    }
+    
+    if (!isValidDate(startDate)) {
+        showToast('Please enter a valid start date', 'error');
+        return;
     }
     
     const maturityDate = calculateMaturityDate(startDate, duration, durationUnit);
+    const certFile = document.getElementById('fdCertificate')?.files?.[0];
     
-    // Handle certificate upload
-    const certFile = document.getElementById('fdCertificate').files[0];
-    
-    const saveFDRecord = (certData) => {
-        const record = {
-            id: currentEditId || generateId(),
-            accountHolder,
-            bank,
-            amount,
-            duration,
-            durationUnit,
-            rate,
-            startDate,
-            maturityDate,
-            certificateStatus: certStatus,
-            fdNumber: fdNumber || '',
-            certificate: certData,
-            notes,
-            createdAt: currentEditId ? undefined : new Date().toISOString(),
-            updatedAt: currentEditId ? new Date().toISOString() : undefined
-        };
-        
-        let records = getData('fd_records') || [];
-        
-        if (currentEditId) {
-            const index = records.findIndex(r => r.id === currentEditId);
-            if (index !== -1) {
-                records[index] = { ...records[index], ...record };
+    /**
+     * Complete the save operation
+     */
+    const completeSave = (certData) => {
+        try {
+            let records = getData('fd_records') || [];
+            
+            const record = {
+                id: currentEditId || generateId(),
+                accountHolder,
+                bank,
+                amount,
+                duration,
+                durationUnit,
+                rate,
+                startDate,
+                maturityDate,
+                certificateStatus: certStatus,
+                fdNumber,
+                certificate: certData,
+                notes,
+                updatedAt: new Date().toISOString()
+            };
+            
+            if (currentEditId) {
+                // Update existing record
+                const index = records.findIndex(r => r.id === currentEditId);
+                if (index !== -1) {
+                    record.createdAt = records[index].createdAt; // Preserve original creation date
+                    records[index] = record;
+                } else {
+                    record.createdAt = new Date().toISOString();
+                    records.push(record);
+                }
+            } else {
+                // Add new record
+                record.createdAt = new Date().toISOString();
+                records.push(record);
             }
-        } else {
-            records.push(record);
+            
+            saveData('fd_records', records);
+            
+            // Refresh UI
+            loadFDRecords();
+            updateDashboard();
+            if (typeof updateAnalytics === 'function') updateAnalytics();
+            if (typeof loadCertificates === 'function') loadCertificates();
+            
+            showToast(currentEditId ? 'FD updated successfully ✓' : 'FD added successfully ✓', 'success');
+            
+            // Reset form
+            resetFDForm();
+            
+        } catch (error) {
+            console.error('Save FD error:', error);
+            showToast('Error saving FD. Please try again.', 'error');
         }
-        
-        saveData('fd_records', records);
-        loadFDRecords();
-        updateDashboard();
-        updateAnalytics();
-        loadCertificates();
-        
-        showToast(currentEditId ? 'FD updated successfully ✓' : 'FD added successfully ✓', 'success');
-        
-        // Clear draft
-        clearDraft();
-        
-        // Reset form
-        document.getElementById('fdForm').reset();
-        removeCertificatePreview();
-        hideSmartSuggestion();
-        currentEditId = null;
-        document.getElementById('formTitle').innerHTML = '<i class="bi bi-plus-circle"></i> Add New FD';
-        document.getElementById('cancelEditBtn').style.display = 'none';
-        
-        // Set today's date again
-        document.getElementById('fdStartDate').value = new Date().toISOString().split('T')[0];
-        updateInterestPreview();
-        
-        // Scroll to top
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        
-        return true;
     };
     
     // Process certificate if uploaded
     if (certFile) {
         if (certFile.size > 5 * 1024 * 1024) {
             showToast('Certificate file size must be less than 5MB', 'error');
-            return false;
+            return;
         }
         
-        readFileAsBase64(certFile).then(data => {
-            saveFDRecord(data);
-        }).catch(error => {
-            console.error('Error reading certificate:', error);
-            showToast('Error uploading certificate', 'error');
-            return false;
-        });
+        showToast('Processing certificate...', 'info');
+        
+        readFileAsBase64(certFile)
+            .then(data => {
+                completeSave(data);
+            })
+            .catch(error => {
+                console.error('Error reading certificate:', error);
+                showToast('Error uploading certificate. Saving without certificate.', 'warning');
+                completeSave(null);
+            });
     } else {
         // Keep existing certificate if editing
+        let existingCert = null;
         if (currentEditId) {
             const records = getData('fd_records') || [];
             const existing = records.find(r => r.id === currentEditId);
-            const certificateData = existing?.certificate;
-            saveFDRecord(certificateData);
-        } else {
-            saveFDRecord(null);
+            existingCert = existing?.certificate || null;
         }
+        completeSave(existingCert);
+    }
+}
+
+/**
+ * Reset FD form to initial state
+ */
+function resetFDForm() {
+    // Clear draft
+    if (typeof clearDraft === 'function') clearDraft();
+    
+    // Reset form
+    const form = document.getElementById('fdForm');
+    if (form) form.reset();
+    
+    // Clear certificate preview
+    if (typeof removeCertificatePreview === 'function') removeCertificatePreview();
+    
+    // Hide smart suggestions
+    if (typeof hideSmartSuggestion === 'function') hideSmartSuggestion();
+    
+    // Reset edit state
+    currentEditId = null;
+    
+    // Update form title
+    const formTitle = document.getElementById('formTitle');
+    if (formTitle) {
+        formTitle.innerHTML = '<i class="bi bi-plus-circle"></i> Add New FD';
     }
     
-    return true;
+    // Hide cancel button
+    const cancelBtn = document.getElementById('cancelEditBtn');
+    if (cancelBtn) {
+        cancelBtn.style.display = 'none';
+    }
+    
+    // Set today's date
+    const startDateInput = document.getElementById('fdStartDate');
+    if (startDateInput) {
+        startDateInput.value = new Date().toISOString().split('T')[0];
+    }
+    
+    // Update interest preview
+    if (typeof updateInterestPreview === 'function') updateInterestPreview();
+    
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+
 function editFD(id) {
     const records = getData('fd_records') || [];
     const record = records.find(r => r.id === id);
     
-    if (!record) return;
+    if (!record) {
+        showToast('Record not found', 'error');
+        return;
+    }
     
     currentEditId = id;
     
-    document.getElementById('fdAccountHolder').value = record.accountHolder;
-    document.getElementById('fdBank').value = record.bank;
-    document.getElementById('fdAmount').value = record.amount;
-    document.getElementById('fdDuration').value = record.duration;
-    document.getElementById('fdDurationUnit').value = record.durationUnit;
-    document.getElementById('fdRate').value = record.rate;
-    document.getElementById('fdStartDate').value = record.startDate;
-    document.getElementById('fdCertStatus').value = record.certificateStatus || 'Not Obtained';
-    document.getElementById('fdNotes').value = record.notes || '';
+    // Populate form fields
+    const fields = {
+        'fdAccountHolder': record.accountHolder,
+        'fdBank': record.bank,
+        'fdAmount': record.amount,
+        'fdDuration': record.duration,
+        'fdDurationUnit': record.durationUnit || 'Months',
+        'fdRate': record.rate,
+        'fdStartDate': record.startDate,
+        'fdCertStatus': record.certificateStatus || 'Not Obtained',
+        'fdNumber': record.fdNumber || '',
+        'fdNotes': record.notes || ''
+    };
     
-    document.getElementById('formTitle').textContent = 'Edit FD';
-    document.getElementById('cancelEditBtn').style.display = 'inline-block';
+    Object.keys(fields).forEach(fieldId => {
+        const element = document.getElementById(fieldId);
+        if (element) {
+            element.value = fields[fieldId];
+        }
+    });
     
-    document.querySelector('#records .card').scrollIntoView({ behavior: 'smooth' });
+    // Update form title
+    const formTitle = document.getElementById('formTitle');
+    if (formTitle) {
+        formTitle.innerHTML = '<i class="bi bi-pencil"></i> Edit FD';
+    }
     
-    updateInterestPreview();
+    // Show cancel button
+    const cancelBtn = document.getElementById('cancelEditBtn');
+    if (cancelBtn) {
+        cancelBtn.style.display = 'inline-block';
+    }
+    
+    // Show certificate preview if exists
+    if (record.certificate && typeof showCertificatePreview === 'function') {
+        showCertificatePreview(record.certificate);
+    }
+    
+    // Toggle certificate upload section
+    if (typeof toggleCertificateUpload === 'function') {
+        toggleCertificateUpload();
+    }
+    
+    // Scroll to form
+    const formCard = document.querySelector('#records .card');
+    if (formCard) {
+        formCard.scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    // Update interest preview
+    if (typeof updateInterestPreview === 'function') updateInterestPreview();
 }
 
 function cancelEdit() {
     currentEditId = null;
-    document.getElementById('fdForm').reset();
-    document.getElementById('formTitle').textContent = 'Add New FD';
-    document.getElementById('cancelEditBtn').style.display = 'none';
+    resetFDForm();
+    showToast('Edit cancelled', 'info');
 }
 
 function deleteFD(id) {
@@ -509,14 +717,16 @@ function deleteFD(id) {
     }
     
     let records = getData('fd_records') || [];
+    const recordToDelete = records.find(r => r.id === id);
     records = records.filter(r => r.id !== id);
     saveData('fd_records', records);
     
     loadFDRecords();
     updateDashboard();
-    updateAnalytics();
+    if (typeof updateAnalytics === 'function') updateAnalytics();
     
-    showToast('FD deleted successfully', 'success');
+    const bankInfo = recordToDelete ? ` (${recordToDelete.bank})` : '';
+    showToast(`FD deleted successfully${bankInfo}`, 'success');
 }
 
 function deleteSelected() {
@@ -538,19 +748,26 @@ function deleteSelected() {
     
     loadFDRecords();
     updateDashboard();
-    updateAnalytics();
+    if (typeof updateAnalytics === 'function') updateAnalytics();
     
     showToast(`${checkboxes.length} record(s) deleted`, 'success');
     
-    document.getElementById('selectAll').checked = false;
-    document.getElementById('deleteSelectedBtn').disabled = true;
+    // Reset selection state
+    const selectAll = document.getElementById('selectAll');
+    if (selectAll) selectAll.checked = false;
+    
+    const deleteBtn = document.getElementById('deleteSelectedBtn');
+    if (deleteBtn) deleteBtn.disabled = true;
 }
 
 function toggleSelectAll() {
-    const selectAll = document.getElementById('selectAll').checked;
+    const selectAll = document.getElementById('selectAll');
+    const isChecked = selectAll?.checked || false;
+    
     document.querySelectorAll('.record-checkbox').forEach(cb => {
-        cb.checked = selectAll;
+        cb.checked = isChecked;
     });
+    
     updateSelectAllState();
 }
 
@@ -558,21 +775,31 @@ function updateSelectAllState() {
     const checkboxes = document.querySelectorAll('.record-checkbox');
     const checkedBoxes = document.querySelectorAll('.record-checkbox:checked');
     
-    document.getElementById('selectAll').checked = 
-        checkboxes.length > 0 && checkboxes.length === checkedBoxes.length;
+    const selectAll = document.getElementById('selectAll');
+    if (selectAll) {
+        selectAll.checked = checkboxes.length > 0 && checkboxes.length === checkedBoxes.length;
+        selectAll.indeterminate = checkedBoxes.length > 0 && checkedBoxes.length < checkboxes.length;
+    }
     
-    document.getElementById('deleteSelectedBtn').disabled = checkedBoxes.length === 0;
+    const deleteBtn = document.getElementById('deleteSelectedBtn');
+    if (deleteBtn) {
+        deleteBtn.disabled = checkedBoxes.length === 0;
+    }
 }
 
 // ===================================
-// Interest Preview
+// Interest Preview (Basic version - enhanced version in Part 2)
 // ===================================
 
 function updateInterestPreview() {
-    const amount = parseFloat(document.getElementById('fdAmount').value) || 0;
-    const rate = parseFloat(document.getElementById('fdRate').value) || 0;
-    const duration = parseInt(document.getElementById('fdDuration').value) || 0;
-    const unit = document.getElementById('fdDurationUnit').value;
+    const amount = parseFloat(document.getElementById('fdAmount')?.value) || 0;
+    const rate = parseFloat(document.getElementById('fdRate')?.value) || 0;
+    const duration = parseInt(document.getElementById('fdDuration')?.value) || 0;
+    const unit = document.getElementById('fdDurationUnit')?.value || 'Months';
+    
+    const previewQuarterly = document.getElementById('previewQuarterly');
+    const previewMonthly = document.getElementById('previewMonthly');
+    const previewAnnual = document.getElementById('previewAnnual');
     
     if (amount && rate && duration) {
         const months = getDurationInMonths(duration, unit);
@@ -581,18 +808,14 @@ function updateInterestPreview() {
         const monthly = calculateCompoundInterest(amount, rate, months, 12);
         const annual = calculateCompoundInterest(amount, rate, months, 1);
         
-        document.getElementById('previewQuarterly').textContent = formatCurrency(quarterly);
-        document.getElementById('previewMonthly').textContent = formatCurrency(monthly);
-        document.getElementById('previewAnnual').textContent = formatCurrency(annual);
+        if (previewQuarterly) previewQuarterly.textContent = formatCurrency(quarterly);
+        if (previewMonthly) previewMonthly.textContent = formatCurrency(monthly);
+        if (previewAnnual) previewAnnual.textContent = formatCurrency(annual);
     } else {
-        document.getElementById('previewQuarterly').textContent = formatCurrency(0);
-        document.getElementById('previewMonthly').textContent = formatCurrency(0);
-        document.getElementById('previewAnnual').textContent = formatCurrency(0);
+        if (previewQuarterly) previewQuarterly.textContent = formatCurrency(0);
+        if (previewMonthly) previewMonthly.textContent = formatCurrency(0);
+        if (previewAnnual) previewAnnual.textContent = formatCurrency(0);
     }
-}
-
-function toggleCustomMaturity() {
-    updateInterestPreview();
 }
 
 // ===================================
@@ -605,15 +828,29 @@ function setupBankAutocomplete() {
     
     if (!bankInput || !datalist) return;
     
+    // Populate initial suggestions
+    const banks = getAllBanks();
+    datalist.innerHTML = '';
+    banks.forEach(bank => {
+        const option = document.createElement('option');
+        option.value = bank;
+        datalist.appendChild(option);
+    });
+    
+    // Update suggestions on input
     bankInput.addEventListener('input', function() {
         const suggestions = getAllBanks();
-        
         datalist.innerHTML = '';
         suggestions.forEach(bank => {
             const option = document.createElement('option');
             option.value = bank;
             datalist.appendChild(option);
         });
+        
+        // Trigger rate suggestion if function exists
+        if (typeof suggestBankRate === 'function') {
+            suggestBankRate();
+        }
     });
 }
 
@@ -639,38 +876,35 @@ function sortTable(column) {
         
         switch (column) {
             case 'holder':
-                valA = a.accountHolder;
-                valB = b.accountHolder;
+                valA = (a.accountHolder || '').toLowerCase();
+                valB = (b.accountHolder || '').toLowerCase();
                 break;
             case 'bank':
-                valA = a.bank;
-                valB = b.bank;
+                valA = (a.bank || '').toLowerCase();
+                valB = (b.bank || '').toLowerCase();
                 break;
             case 'amount':
-                valA = a.amount;
-                valB = b.amount;
+                valA = parseFloat(a.amount) || 0;
+                valB = parseFloat(b.amount) || 0;
                 break;
             case 'rate':
-                valA = a.rate;
-                valB = b.rate;
+                valA = parseFloat(a.rate) || 0;
+                valB = parseFloat(b.rate) || 0;
                 break;
             case 'startDate':
-                valA = new Date(a.startDate);
-                valB = new Date(b.startDate);
+                valA = a.startDate ? new Date(a.startDate).getTime() : 0;
+                valB = b.startDate ? new Date(b.startDate).getTime() : 0;
+                if (isNaN(valA)) valA = 0;
+                if (isNaN(valB)) valB = 0;
                 break;
             case 'daysRemaining':
                 const matA = a.maturityDate || calculateMaturityDate(a.startDate, a.duration, a.durationUnit);
                 const matB = b.maturityDate || calculateMaturityDate(b.startDate, b.duration, b.durationUnit);
-                valA = calculateDaysRemaining(matA);
-                valB = calculateDaysRemaining(matB);
+                valA = calculateDaysRemaining(matA) || 0;
+                valB = calculateDaysRemaining(matB) || 0;
                 break;
             default:
                 return 0;
-        }
-        
-        if (typeof valA === 'string') {
-            valA = valA.toLowerCase();
-            valB = valB.toLowerCase();
         }
         
         if (valA < valB) return sortAscending ? -1 : 1;
@@ -686,7 +920,18 @@ function sortTable(column) {
 // ===================================
 
 function loadSampleData() {
-    if (confirm('This will load 3 sample FD records for testing. Continue?')) {
+    const warningMessage = `⚠️ WARNING: This will:
+1. Replace your current PIN with demo PIN: 1234
+2. Replace all existing account holders
+3. Replace all existing FD records
+
+Are you sure you want to continue?`;
+
+    if (!confirm(warningMessage)) {
+        return;
+    }
+    
+    try {
         const sampleHolders = ['Ram Sharma', 'Sita Thapa'];
         const sampleRecords = [
             {
@@ -733,7 +978,7 @@ function loadSampleData() {
             }
         ];
         
-        // Create PIN 1234 for demo
+        // Create demo PIN
         const demoPin = '1234';
         const hash = CryptoJS.SHA256(demoPin).toString();
         localStorage.setItem('fd_pin', hash);
@@ -743,13 +988,17 @@ function loadSampleData() {
         saveData('fd_account_holders', sampleHolders);
         saveData('fd_records', sampleRecords);
         saveData('fd_templates', []);
+        saveData('fd_calculations', []);
         
-        showToast('Sample data loaded! Use PIN: 1234 to login', 'success');
+        showToast('✅ Sample data loaded! PIN changed to: 1234', 'success');
         
         setTimeout(() => {
             location.reload();
         }, 2000);
+    } catch (error) {
+        console.error('Error loading sample data:', error);
+        showToast('❌ Failed to load sample data', 'error');
     }
 }
 
-console.log('[FD Manager Nepal] App.js loaded successfully');
+console.log('[FD Manager Nepal] App.js Part 1 loaded successfully');
