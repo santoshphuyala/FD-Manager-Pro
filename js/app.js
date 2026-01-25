@@ -1,12 +1,12 @@
 // ===================================
 // FD Manager Pro - Main Application
-// Part 1: Core & Authentication
-// Nepal Edition - Version 4.0 (Corrected)
+// Modular Version with PWA Support
+// Nepal Edition - Version 4.1
 // ===================================
 
-// Global variables for pagination
-let currentPage = 1;
-const recordsPerPage = 10;
+import { checkLogin, setupPin, login, logout, showResetConfirm } from './auth.js';
+import { initializeApp, initializeEventListeners } from './core.js';
+import { pinHash } from './utils.js';
 
 // ===================================
 // Initialization
@@ -14,9 +14,23 @@ const recordsPerPage = 10;
 
 document.addEventListener('DOMContentLoaded', async function() {
     checkLogin();
-    loadSettings();
+    // loadSettings(); // TODO
     await initializeEventListeners();
 });
+
+// ===================================
+// Global Functions for HTML
+// ===================================
+
+window.login = login;
+window.setupPin = setupPin;
+window.showResetConfirm = showResetConfirm;
+window.logout = logout;
+
+// Initialize app after login
+window.initializeApp = initializeApp;
+
+console.log('[FD Manager Pro] Modular app loaded');
 
 // ===================================
 // Login & Authentication

@@ -8,7 +8,15 @@
 // ===================================
 
 let pinHash = '';
+
+function setPinHash(hash) {
+    pinHash = hash;
+}
 let currentEditId = null;
+
+function setCurrentEditId(id) {
+    currentEditId = id;
+}
 let currentChartType = 'pie';
 let portfolioChart = null;
 let analyticsChart = null;
@@ -49,6 +57,25 @@ const bankDatabase = [
     'Civil Bank Limited',
     'Nepal Credit and Commerce Bank Limited'
 ];
+
+// Get all banks for autocomplete
+async function getAllBanks() {
+    try {
+        let allBanks = [...bankDatabase]; // Start with static bank list
+        
+        // Only try to get records if PIN is initialized
+        if (pinHash) {
+            const records = (await getData('fd_records')) || [];
+            const recordBanks = records.map(r => r.bank).filter(b => b && !allBanks.includes(b));
+            allBanks = [...allBanks, ...recordBanks];
+        }
+        
+        return [...new Set(allBanks)].sort(); // Remove duplicates and sort
+    } catch (error) {
+        console.error('Error getting all banks:', error);
+        return [...bankDatabase].sort();
+    }
+}
 
 // Bank rate patterns for OCR
 const bankPatterns = [
@@ -359,8 +386,67 @@ function calculateInterestForRecord(record) {
     return calculateCompoundInterest(record.amount, record.rate, durationMonths, 4);
 }
 
+/**
+ * Calculate interest for a custom date range on an existing FD record
+ * @param {object} record - FD record object
+ * @param {string} fromDate - Start date for calculation (YYYY-MM-DD)
+ * @param {string} toDate - End date for calculation (YYYY-MM-DD)
+ * @param {number} frequency - Compounding frequency (1, 4, 12, 365, 0)
+ * @returns {number} - Interest amount for the custom period
+ */
+function calculateInterestForCustomDateRange(record, fromDate, toDate, frequency = 4) {
+    if (!record || !record.amount || !record.rate || !fromDate || !toDate) return 0;
+    
+    const recordStart = new Date(record.startDate);
+    const recordEnd = new Date(record.maturityDate || calculateMaturityDate(record.startDate, record.duration, record.durationUnit));
+    const customStart = new Date(fromDate);
+    const customEnd = new Date(toDate);
+    
+    // Ensure dates are within FD term
+    const effectiveStart = customStart < recordStart ? recordStart : customStart;
+    const effectiveEnd = customEnd > recordEnd ? recordEnd : customEnd;
+    
+    if (effectiveStart >= effectiveEnd) return 0;
+    
+    // Calculate maturity amount at effective start date
+    let maturityAtStart = record.amount;
+    if (effectiveStart > recordStart) {
+        const daysToStart = calculateDurationFromDates(record.startDate, effectiveStart);
+        const monthsToStart = (daysToStart / 365) * 12;
+        maturityAtStart = record.amount + calculateCompoundInterest(record.amount, record.rate, monthsToStart, frequency);
+    }
+    
+    // Calculate maturity amount at effective end date
+    const daysToEnd = calculateDurationFromDates(record.startDate, effectiveEnd);
+    const monthsToEnd = (daysToEnd / 365) * 12;
+    const maturityAtEnd = record.amount + calculateCompoundInterest(record.amount, record.rate, monthsToEnd, frequency);
+    
+    // Interest for custom period is the difference
+    return maturityAtEnd - maturityAtStart;
+}
+
 // ===================================
 // Formatting Functions
+// ===================================
+
+/**
+ * Get frequency name for display
+ * @param {number} frequency - Compounding frequency
+ * @returns {string} - Frequency name
+ */
+function getFrequencyName(frequency) {
+    const frequencyNames = {
+        4: 'Quarterly (4/year)',
+        12: 'Monthly (12/year)',
+        1: 'Annually (1/year)',
+        365: 'Daily (365/year)',
+        0: 'At Maturity (Simple)'
+    };
+    return frequencyNames[frequency] || 'Unknown';
+}
+
+// ===================================
+// Loading States
 // ===================================
 
 /**
@@ -1265,6 +1351,16 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('[FD Manager Nepal] Version 4.0 (Corrected)');
 });
 
-// Debug log (at end of file, so all functions are defined)
-console.log('[FD Manager] utils.js loaded');
-console.log('[FD Manager] showToast available:', typeof showToast === 'function');
+// ===================================
+// Loading States
+// ===================================
+
+function showLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.style.display = 'flex';
+}
+
+function hideLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.style.display = 'none';
+}
