@@ -6,9 +6,8 @@ const URLS_TO_CACHE = [
   'css/styles.css',
   'js/utils.js',
   'js/ocr-enhanced.js',
-  'js/app.js',
-  'js/app-part2.js',
-  'js/app-part3.js',
+  'js/dataManager.js',
+  'js/combined.js',
   // Add paths to your icons (from manifest.json)
   'images/icon-192x192.png',
   'images/icon-512x512.png',
@@ -41,6 +40,11 @@ self.addEventListener('install', (event) => {
 
 // Fetch event: serve from cache first, then network
 self.addEventListener('fetch', (event) => {
+  // Only handle http/https requests
+  if (!event.request.url.startsWith('http')) {
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request)
       .then((response) => {

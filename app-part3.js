@@ -440,6 +440,199 @@ function performCalculation() {
 }
 
 /**
+ * Main calculation function
+ */
+async function performCalculation() {
+    const mode = document.getElementById('calcMode').value;
+    let principal, rate, durationValue, unit;
+    
+    // Get values based on mode
+    principal = parseFloat(document.getElementById('calcPrincipal').value);
+    rate = parseFloat(document.getElementById('calcRate').value);
+    
+    // Check for date range input
+    const useDateRange = (mode === 'existing' && document.getElementById('calcCustomDateRange')?.checked) ||
+                         (mode === 'manual' && document.getElementById('calcManualDateRange')?.checked);
+    
+    let fromDate, toDate;
+    if (useDateRange) {
+        if (mode === 'existing') {
+            fromDate = document.getElementById('calcFromDate').value;
+            toDate = document.getElementById('calcToDate').value;
+            
+            if (!isValidDate(fromDate) || !isValidDate(toDate)) {
+                return;
+            }
+            
+            // Swap dates if from > to
+            if (new Date(fromDate) > new Date(toDate)) {
+                [fromDate, toDate] = [toDate, fromDate];
+                document.getElementById('calcFromDate').value = fromDate;
+                document.getElementById('calcToDate').value = toDate;
+            }
+            
+            // Cap dates to FD term
+            const fdId = document.getElementById('calcFDSelect').value;
+            const records = (await getData('fd_records')) || [];
+            const record = records.find(r => r.id === fdId);
+            if (record) {
+                const maturityDate = calculateMaturityDate(record.startDate, record.duration, record.durationUnit);
+                const fdStart = new Date(record.startDate);
+                const fdEnd = new Date(maturityDate);
+                const customFrom = new Date(fromDate);
+                const customTo = new Date(toDate);
+                
+                if (customFrom < fdStart) {
+                    fromDate = record.startDate;
+                    document.getElementById('calcFromDate').value = fromDate;
+                }
+                if (customTo > fdEnd) {
+                    toDate = maturityDate;
+                    document.getElementById('calcToDate').value = toDate;
+                }
+            }
+        } else { // manual
+            fromDate = document.getElementById('calcManualStartDate').value;
+            toDate = document.getElementById('calcManualEndDate').value;
+            
+            if (!isValidDate(fromDate) || !isValidDate(toDate)) {
+                return;
+            }
+            
+            // Swap dates if from > to
+            if (new Date(fromDate) > new Date(toDate)) {
+                [fromDate, toDate] = [toDate, fromDate];
+                document.getElementById('calcManualStartDate').value = fromDate;
+                document.getElementById('calcManualEndDate').value = toDate;
+            }
+        }
+        
+        if (!fromDate || !toDate) {
+            showToast('Please select both start and end dates', 'error');
+            return;
+        }
+        
+        const days = calculateDurationFromDates(fromDate, toDate);
+        durationValue = days;
+        unit = 'Days';
+    } else {
+        durationValue = parseInt(document.getElementById('calcDuration').value);
+        unit = document.getElementById('calcUnit').value;
+    }
+    
+    const frequency = parseInt(document.getElementById('calcFrequency').value);
+    
+    // Special handling for existing FD with custom date range
+    if (useDateRange && mode === 'existing') {
+        const fdId = document.getElementById('calcFDSelect').value;
+        const records = (await getData('fd_records')) || [];
+        const record = records.find(r => r.id === fdId);
+        
+        if (!record) {
+            showToast('FD record not found', 'error');
+            return;
+        }
+        
+        // Use the new custom date range calculation function
+        const interest = calculateInterestForCustomDateRange(record, fromDate, toDate, frequency);
+        const maturityAmount = record.amount + calculateInterestForRecord(record); // Full maturity
+        const customMaturityAmount = record.amount + interest; // Maturity at custom end date
+        
+        // Calculate simple interest for comparison (approximate)
+        const days = calculateDurationFromDates(fromDate, toDate);
+        const months = (days / 365) * 12;
+        const simpleInterest = calculateSimpleInterest(record.amount, record.rate, months);
+        
+        // Display results
+        document.getElementById('resultPrincipal').textContent = formatCurrency(record.amount);
+        document.getElementById('resultRate').textContent = record.rate + '% p.a.';
+        document.getElementById('resultDuration').textContent = `${days} Days (Custom Range)`;
+        document.getElementById('resultFrequency').textContent = getFrequencyName(frequency);
+        document.getElementById('resultSimple').textContent = formatCurrency(simpleInterest);
+        document.getElementById('resultCompound').textContent = formatCurrency(interest);
+        document.getElementById('resultMaturity').textContent = formatCurrency(customMaturityAmount);
+        document.getElementById('resultDifference').textContent = formatCurrency(interest - simpleInterest);
+        
+        // Show results
+        document.getElementById('calcResults').style.display = 'block';
+        document.getElementById('noCalcResults').style.display = 'none';
+        
+        // Show comparison chart
+        showInterestComparison(record.amount, simpleInterest, interest);
+        
+        // Success message
+        showToast('Custom date range calculation completed!', 'success');
+        return;
+    }
+    
+    // Standard calculation for manual mode or existing FD without custom date range
+    if (mode === 'existing' && !useDateRange) {
+        const fdId = document.getElementById('calcFDSelect').value;
+        const records = (await getData('fd_records')) || [];
+        const record = records.find(r => r.id === fdId);
+        
+        if (record) {
+            principal = record.amount;
+            rate = record.rate;
+            durationValue = record.duration;
+            unit = record.durationUnit;
+        }
+    }
+    
+    // Validation
+    if (!principal || principal <= 0) {
+        showToast('Please enter valid principal amount', 'error');
+        return;
+    }
+    
+    if (!rate || rate <= 0) {
+        showToast('Please enter valid interest rate', 'error');
+        return;
+    }
+    
+    if (!durationValue || durationValue <= 0) {
+        showToast('Please enter valid duration', 'error');
+        return;
+    }
+    
+    // Calculate in months
+    let months;
+    if (unit === 'Days') {
+        months = (durationValue / 365) * 12; // More accurate calculation
+    } else if (unit === 'Years') {
+        months = durationValue * 12;
+    } else {
+        months = durationValue;
+    }
+    
+    // Calculate interest
+    const simpleInterest = calculateSimpleInterest(principal, rate, months);
+    const compoundInterest = calculateCompoundInterest(principal, rate, months, frequency);
+    const maturityAmount = principal + compoundInterest;
+    const difference = compoundInterest - simpleInterest;
+    
+    // Display results
+    document.getElementById('resultPrincipal').textContent = formatCurrency(principal);
+    document.getElementById('resultRate').textContent = rate + '% p.a.';
+    document.getElementById('resultDuration').textContent = `${durationValue} ${unit}`;
+    document.getElementById('resultFrequency').textContent = getFrequencyName(frequency);
+    document.getElementById('resultSimple').textContent = formatCurrency(simpleInterest);
+    document.getElementById('resultCompound').textContent = formatCurrency(compoundInterest);
+    document.getElementById('resultMaturity').textContent = formatCurrency(maturityAmount);
+    document.getElementById('resultDifference').textContent = formatCurrency(difference);
+    
+    // Show results
+    document.getElementById('calcResults').style.display = 'block';
+    document.getElementById('noCalcResults').style.display = 'none';
+    
+    // Show comparison chart
+    showInterestComparison(principal, simpleInterest, compoundInterest);
+    
+    // Success message
+    showToast('Calculation completed successfully!', 'success');
+}
+
+/**
  * Show interest comparison chart (FIXED)
  */
 function showInterestComparison(principal, simpleInterest, compoundInterest) {

@@ -589,19 +589,32 @@
                 </div>
             </div>
             <div class="card-body table-responsive">
-                <div class="mb-2">
-                    <button class="btn btn-sm btn-danger" onclick="deleteSelected()" id="deleteSelectedBtn" disabled>
-                        <i class="bi bi-trash"></i> Delete Selected
-                    </button>
-                    <button class="btn btn-sm btn-success" onclick="exportToExcel()">
-                        <i class="bi bi-file-excel"></i> Export to Excel
-                    </button>
-                    <button class="btn btn-sm btn-primary" onclick="exportAllPDF()">
-                        <i class="bi bi-file-pdf"></i> Export to PDF
-                    </button>
-                    <button class="btn btn-sm btn-info" onclick="importCSV()">
-                        <i class="bi bi-upload"></i> Import CSV
-                    </button>
+                <div class="mb-2 d-flex justify-content-between align-items-center">
+                    <div>
+                        <button class="btn btn-sm btn-danger" onclick="deleteSelected()" id="deleteSelectedBtn" disabled>
+                            <i class="bi bi-trash"></i> Delete Selected
+                        </button>
+                        <button class="btn btn-sm btn-success" onclick="exportToExcel()">
+                            <i class="bi bi-file-excel"></i> Export to Excel
+                        </button>
+                        <button class="btn btn-sm btn-primary" onclick="exportAllPDF()">
+                            <i class="bi bi-file-pdf"></i> Export to PDF
+                        </button>
+                        <button class="btn btn-sm btn-info" onclick="importCSV()">
+                            <i class="bi bi-upload"></i> Import CSV
+                        </button>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <label for="recordsPerPageSelect" class="form-label me-2 mb-0 small">Records per page:</label>
+                        <select class="form-select form-select-sm" id="recordsPerPageSelect" onchange="changeRecordsPerPage(this.value)" style="width: auto;">
+                            <option value="5">5</option>
+                            <option value="10" selected>10</option>
+                            <option value="20">20</option>
+                            <option value="30">30</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
                 </div>
                 <table class="table table-hover table-striped" id="recordsTable">
                     <thead>
@@ -877,7 +890,7 @@
                         <!-- Calculation Mode -->
                         <div class="mb-3">
                             <label class="form-label"><strong>Calculation Mode</strong></label>
-                            <select class="form-select" id="calcMode" onchange="toggleCalcMode()">
+                            <select class="form-select" id="calcMode" onchange="(async () => await toggleCalcMode())()">
                                 <option value="manual">Custom Input (Manual)</option>
                                 <option value="existing">From Existing FD</option>
                             </select>
@@ -887,13 +900,13 @@
                         <div id="existingFDSection" style="display:none;">
                             <div class="mb-3">
                                 <label class="form-label">Select Account Holder</label>
-                                <select class="form-select" id="calcAccountHolder" onchange="loadFDsForCalc()">
+                                <select class="form-select" id="calcAccountHolder" onchange="(async () => await loadFDsForCalc())()">
                                     <option value="">Select Holder</option>
                                 </select>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Select FD</label>
-                                <select class="form-select" id="calcFDSelect" onchange="fillCalcFromFD()">
+                                <select class="form-select" id="calcFDSelect" onchange="(async () => await fillCalcFromFD())()">
                                     <option value="">Select FD</option>
                                 </select>
                             </div>
@@ -979,7 +992,7 @@
                             </select>
                         </div>
 
-                        <button type="button" class="btn btn-primary w-100" onclick="performCalculation()">
+                        <button type="button" class="btn btn-primary w-100" onclick="(async () => await performCalculation())()">
                             <i class="bi bi-calculator"></i> Calculate Interest
                         </button>
                     </div>
@@ -1161,6 +1174,59 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-outline-primary" onclick="useOriginalPrincipal()" data-bs-dismiss="modal">Use Original Principal</button>
                 <button type="button" class="btn btn-primary" onclick="useCompoundedPrincipal()" data-bs-dismiss="modal">Use Compounded Principal</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tax Calculation Modal -->
+<div class="modal fade" id="taxCalculationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="bi bi-calculator-fill"></i> Tax Calculation</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    <h6>Interest Summary</h6>
+                    <p><strong>Compound Interest:</strong> <span id="modalCompoundInterest">-</span></p>
+                    <p><strong>Simple Interest:</strong> <span id="modalSimpleInterest">-</span></p>
+                </div>
+
+                <div class="mb-3">
+                    <label for="taxRateInput" class="form-label">Tax Rate (%)</label>
+                    <div class="input-group">
+                        <input type="number" class="form-control" id="taxRateInput" min="0" max="100" step="0.01" placeholder="15.0">
+                        <span class="input-group-text">%</span>
+                    </div>
+                    <div class="form-text">Default 15% tax rate applied (TDS rate for Nepal). Change if needed.</div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Tax Amount</label>
+                            <input type="text" class="form-control" id="taxAmountDisplay" readonly>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Net Interest (After Tax)</label>
+                            <input type="text" class="form-control fw-bold text-success" id="netInterestDisplay" readonly>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="alert alert-secondary small">
+                    <strong>Note:</strong> Tax is calculated on the compound interest amount. Net interest = Compound Interest - Tax Amount.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" onclick="saveCalculationWithTax()">
+                    <i class="bi bi-save"></i> Save with Tax Details
+                </button>
             </div>
         </div>
     </div>
@@ -1523,9 +1589,10 @@
     <script src="js/utils.js"></script>
     <script src="js/ocr-enhanced.js"></script>
     <script src="js/dataManager.js"></script>
-    <script src="js/app.js"></script>
-    <script src="js/app-part2.js"></script>
-    <script src="js/app-part3.js"></script>
+    <script src="js/combined.js"></script>
+    <!-- <script type="module" src="js/app.js"></script> -->
+    <!-- <script src="js/app-part2.js"></script> -->
+    <!-- <script src="js/app-part3.js"></script> -->
 
     <!-- Loading Overlay -->
     <div id="loadingOverlay" class="loading-overlay" style="display:none;">
@@ -1533,6 +1600,21 @@
             <span class="visually-hidden">Loading...</span>
         </div>
     </div>
+
+    <!-- Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('sw.js')
+                    .then(function(registration) {
+                        console.log('SW registered: ', registration);
+                    })
+                    .catch(function(registrationError) {
+                        console.log('SW registration failed: ', registrationError);
+                    });
+            });
+        }
+    </script>
 
 </body>
 </html>
