@@ -754,6 +754,28 @@ function isValidDate(dateString) {
 }
 
 /**
+ * Validate duration (positive integer)
+ */
+function isValidDuration(duration) {
+    const num = parseInt(duration);
+    return !isNaN(num) && num > 0 && num <= 999;
+}
+
+/**
+ * Validate account holder name
+ */
+function isValidAccountHolder(name) {
+    return name && typeof name === 'string' && name.trim().length > 0 && name.length <= 50;
+}
+
+/**
+ * Validate bank name
+ */
+function isValidBank(bank) {
+    return bank && typeof bank === 'string' && bank.trim().length > 0 && bank.length <= 100;
+}
+
+/**
  * Validate certificate data URI
  */
 function isValidCertificateData(data) {
@@ -1121,13 +1143,13 @@ function getChartColors(count) {
 /**
  * Get all banks (from database + history)
  */
-function getAllBanks() {
+async function getAllBanks() {
     try {
         let allBanks = [...bankDatabase]; // Start with static bank list
         
         // Only try to get records if PIN is initialized
         if (pinHash) {
-            const records = getData('fd_records') || [];
+            const records = (await getData('fd_records')) || [];
             const historyBanks = [...new Set(
                 records
                     .map(r => r.bank)
@@ -1154,7 +1176,7 @@ function getAllBanks() {
 /**
  * Create full backup of all data
  */
-function backupData() {
+async function backupData() {
     try {
         if (!pinHash) {
             showToast('❌ Please log in first', 'danger');
@@ -1164,12 +1186,12 @@ function backupData() {
         const backupObject = {
             version: '4.0',
             timestamp: new Date().toISOString(),
-            records: getData('fd_records') || [],
-            accountHolders: getData('fd_account_holders') || [],
-            templates: getData('fd_templates') || [],
+            records: (await getData('fd_records')) || [],
+            accountHolders: (await getData('fd_account_holders')) || [],
+            templates: (await getData('fd_templates')) || [],
             settings: JSON.parse(localStorage.getItem('fd_settings') || '{}'),
-            calculations: getData('fd_calculations') || [],
-            comparisons: getData('fd_comparisons') || []
+            calculations: (await getData('fd_calculations')) || [],
+            comparisons: (await getData('fd_comparisons')) || []
         };
 
         const dataStr = JSON.stringify(backupObject, null, 2);
@@ -1198,11 +1220,11 @@ function backupData() {
 /**
  * Export all FD records to CSV
  */
-function exportAllToCSV() {
+async function exportAllToCSV() {
     try {
         console.log('[FD Manager] Starting CSV export...');
         
-        const records = getData('fd_records') || [];
+        const records = (await getData('fd_records')) || [];
         
         if (!Array.isArray(records) || records.length === 0) {
             showToast('⚠️ No records available to export', 'warning');

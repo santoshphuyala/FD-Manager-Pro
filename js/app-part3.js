@@ -53,7 +53,7 @@ function safeCreateChart(ctx, config) {
 // Analytics Functions (FIXED)
 // ===================================
 
-function updateAnalytics() {
+async function updateAnalytics() {
     try {
         // Check if PIN is initialized before getting data
         if (!pinHash) {
@@ -61,7 +61,7 @@ function updateAnalytics() {
             return;
         }
         
-        const records = getData('fd_records') || [];
+        const records = (await getData('fd_records')) || [];
         
         if (records.length === 0) {
             const canvas = document.getElementById('analyticsChart');
@@ -224,7 +224,7 @@ let interestComparisonChart = null;
 /**
  * Toggle between manual and existing FD mode
  */
-function toggleCalcMode() {
+async function toggleCalcMode() {
     try {
         if (!pinHash) {
             showToast('Please log in first', 'error');
@@ -240,7 +240,7 @@ function toggleCalcMode() {
             if (existingSection) existingSection.style.display = 'block';
             if (manualSection) manualSection.style.display = 'none';
             
-            loadAccountHoldersForCalc();
+            await loadAccountHoldersForCalc();
         } else {
             const existingSection = document.getElementById('existingFDSection');
             const manualSection = document.getElementById('manualInputSection');
@@ -256,7 +256,7 @@ function toggleCalcMode() {
 /**
  * Load account holders for calculator
  */
-function loadAccountHoldersForCalc() {
+async function loadAccountHoldersForCalc() {
     try {
         if (!pinHash) {
             console.warn('Cannot load account holders: PIN not initialized');
@@ -264,7 +264,7 @@ function loadAccountHoldersForCalc() {
             return;
         }
         
-        const holders = getData('fd_account_holders') || [];
+        const holders = (await getData('fd_account_holders')) || [];
         const select = document.getElementById('calcAccountHolder');
         
         if (!select) return;
@@ -289,7 +289,7 @@ function loadAccountHoldersForCalc() {
 /**
  * Load FDs for selected holder
  */
-function loadFDsForCalc() {
+async function loadFDsForCalc() {
     try {
         if (!pinHash) {
             console.warn('Cannot load FDs: PIN not initialized');
@@ -304,7 +304,7 @@ function loadFDsForCalc() {
             return;
         }
         
-        let records = getData('fd_records') || [];
+        let records = (await getData('fd_records')) || [];
         records = records.filter(r => r.accountHolder === holder);
         
         select.innerHTML = '<option value="">Select FD</option>';
@@ -327,7 +327,7 @@ function loadFDsForCalc() {
 /**
  * Fill calculator from selected FD
  */
-function fillCalcFromFD() {
+async function fillCalcFromFD() {
     try {
         if (!pinHash) {
             showToast('Please log in first', 'error');
@@ -337,7 +337,7 @@ function fillCalcFromFD() {
         const fdId = document.getElementById('calcFDSelect')?.value;
         if (!fdId) return;
         
-        const records = getData('fd_records') || [];
+        const records = (await getData('fd_records')) || [];
         const record = records.find(r => r.id === fdId);
         
         if (!record) return;
@@ -442,7 +442,7 @@ function calculateDurationFromDates(fromDate, toDate) {
 /**
  * Main calculation function (IMPROVED)
  */
-function performCalculation() {
+async function performCalculation() {
     try {
         const mode = document.getElementById('calcMode')?.value;
         let principal, rate, durationValue, unit;
@@ -475,7 +475,7 @@ function performCalculation() {
                 
                 // Cap dates to FD term
                 const fdId = document.getElementById('calcFDSelect')?.value;
-                const records = getData('fd_records') || [];
+                const records = (await getData('fd_records')) || [];
                 const record = records.find(r => r.id === fdId);
                 if (record) {
                     const maturityDate = calculateMaturityDate(record.startDate, record.duration, record.durationUnit);
@@ -528,7 +528,7 @@ function performCalculation() {
         // Adjust principal for existing FD if fromDate is after startDate
         if (useDateRange && mode === 'existing') {
             const fdId = document.getElementById('calcFDSelect')?.value;
-            const records = getData('fd_records') || [];
+            const records = (await getData('fd_records')) || [];
             const record = records.find(r => r.id === fdId);
             
             if (record && record.startDate && fromDate) {
@@ -1003,22 +1003,22 @@ function clearCalculationHistory() {
 }
 
 // Keep backward compatibility
-function calculateInterest() {
-    performCalculation();
+async function calculateInterest() {
+    await performCalculation();
 }
 
 // ===================================
 // Certificate Functions (IMPROVED)
 // ===================================
 
-function loadCertificates() {
+async function loadCertificates() {
     try {
         if (!pinHash) {
             console.warn('Cannot load certificates: PIN not initialized');
             return;
         }
         
-        const records = getData('fd_records') || [];
+        const records = (await getData('fd_records')) || [];
         const recordsWithCerts = records.filter(r => r.certificate);
         
         const container = document.getElementById('certificatesGallery');
@@ -1062,14 +1062,14 @@ function loadCertificates() {
 // Export Functions
 // ===================================
 
-function exportAllPDF() {
+async function exportAllPDF() {
     try {
         if (!pinHash) {
             showToast('Please log in first', 'error');
             return;
         }
         
-        const records = getData('fd_records') || [];
+        const records = (await getData('fd_records')) || [];
         
         if (records.length === 0) {
             showToast('No records to export', 'warning');
@@ -1135,14 +1135,14 @@ function exportAllPDF() {
     }
 }
 
-function exportToExcel() {
+async function exportToExcel() {
     try {
         if (!pinHash) {
             showToast('Please log in first', 'error');
             return;
         }
         
-        const records = getData('fd_records') || [];
+        const records = (await getData('fd_records')) || [];
         
         if (records.length === 0) {
             showToast('No records to export', 'warning');
@@ -1721,7 +1721,7 @@ function handleBulkCSVImportSmart() {
         
         const reader = new FileReader();
         
-        reader.onload = function(e) {
+        reader.onload = async function(e) {
             try {
                 const csvText = e.target.result;
                 const csvRecords = parseCSV(csvText);
@@ -1733,7 +1733,7 @@ function handleBulkCSVImportSmart() {
                 }
                 
                 // Get existing records
-                const existingRecords = getData('fd_records') || [];
+                const existingRecords = (await getData('fd_records')) || [];
                 
                 // Prepare import records - FLEXIBLE HEADER MAPPING
                 const importRecords = csvRecords.map(csvRecord => {
@@ -1763,8 +1763,8 @@ function handleBulkCSVImportSmart() {
                 const analysis = analyzeImportData(importRecords, existingRecords);
                 
                 // Show preview dialog
-                showImportPreview(analysis, function(selectedOption, analysisData) {
-                    processSmartImport(selectedOption, analysisData, fileInput);
+                showImportPreview(analysis, async function(selectedOption, analysisData) {
+                    await processSmartImport(selectedOption, analysisData, fileInput);
                 });
                 
             } catch (error) {
@@ -1784,10 +1784,10 @@ function handleBulkCSVImportSmart() {
 /**
  * Process import based on user selection
  */
-function processSmartImport(option, analysis, fileInput) {
+async function processSmartImport(option, analysis, fileInput) {
     try {
-        let records = getData('fd_records') || [];
-        let holders = getData('fd_account_holders') || [];
+        let records = (await getData('fd_records')) || [];
+        let holders = (await getData('fd_account_holders')) || [];
         
         const beforeCount = records.length;
         let addedCount = 0;
@@ -1954,7 +1954,7 @@ function restoreDataSmart() {
         
         const reader = new FileReader();
         
-        reader.onload = function(e) {
+        reader.onload = async function(e) {
             try {
                 const data = JSON.parse(e.target.result);
                 
@@ -1964,14 +1964,14 @@ function restoreDataSmart() {
                 }
                 
                 const importRecords = data.records || [];
-                const existingRecords = getData('fd_records') || [];
+                const existingRecords = (await getData('fd_records')) || [];
                 
                 // Analyze import data
                 const analysis = analyzeImportData(importRecords, existingRecords);
                 
                 // Show preview dialog
-                showImportPreview(analysis, function(selectedOption, analysisData) {
-                    processSmartRestore(selectedOption, analysisData, data, fileInput);
+                showImportPreview(analysis, async function(selectedOption, analysisData) {
+                    await processSmartRestore(selectedOption, analysisData, data, fileInput);
                 });
                 
             } catch (error) {
@@ -1991,11 +1991,11 @@ function restoreDataSmart() {
 /**
  * Process restore based on user selection
  */
-function processSmartRestore(option, analysis, backupData, fileInput) {
+async function processSmartRestore(option, analysis, backupData, fileInput) {
     try {
-        let records = getData('fd_records') || [];
-        let holders = getData('fd_account_holders') || [];
-        let templates = getData('fd_templates') || [];
+        let records = (await getData('fd_records')) || [];
+        let holders = (await getData('fd_account_holders')) || [];
+        let templates = (await getData('fd_templates')) || [];
         
         const beforeCount = records.length;
         let addedCount = 0;

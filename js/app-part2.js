@@ -100,7 +100,7 @@ async function processOCR() {
     document.getElementById('ocrPreview').src = imageData;
 }
 
-function confirmOCRData() {
+async function confirmOCRData() {
     if (!ocrExtractedData) {
         showToast('No data to save', 'error');
         return;
@@ -138,9 +138,9 @@ function confirmOCRData() {
         record.maturityDate = calculateMaturityDate(record.startDate, record.duration, record.durationUnit);
     }
     
-    let records = getData('fd_records') || [];
+    let records = (await getData('fd_records')) || [];
     records.push(record);
-    saveData('fd_records', records);
+    await saveData('fd_records', records);
     
     loadFDRecords();
     updateDashboard();
@@ -188,8 +188,8 @@ function cancelOCR() {
 // Templates Functions
 // ===================================
 
-function loadTemplates() {
-    const templates = getData('fd_templates') || [];
+async function loadTemplates() {
+    const templates = (await getData('fd_templates')) || [];
     displayTemplates(templates);
 }
 
@@ -219,7 +219,7 @@ function displayTemplates(templates) {
     `).join('');
 }
 
-function saveTemplate(event) {
+async function saveTemplate(event) {
     event.preventDefault();
     
     const name = document.getElementById('templateName').value.trim();
@@ -243,9 +243,9 @@ function saveTemplate(event) {
         createdAt: new Date().toISOString()
     };
     
-    let templates = getData('fd_templates') || [];
+    let templates = (await getData('fd_templates')) || [];
     templates.push(template);
-    saveData('fd_templates', templates);
+    await saveData('fd_templates', templates);
     
     loadTemplates();
     
@@ -257,8 +257,8 @@ function saveTemplate(event) {
     showToast('Template saved successfully!', 'success');
 }
 
-function applyTemplate(templateId) {
-    const templates = getData('fd_templates') || [];
+async function applyTemplate(templateId) {
+    const templates = (await getData('fd_templates')) || [];
     const template = templates.find(t => t.id === templateId);
     
     if (!template) return;
@@ -275,12 +275,12 @@ function applyTemplate(templateId) {
     showToast(`Template "${template.name}" applied. Fill remaining fields.`, 'success');
 }
 
-function deleteTemplate(templateId) {
+async function deleteTemplate(templateId) {
     if (!confirm('Delete this template?')) return;
     
-    let templates = getData('fd_templates') || [];
+    let templates = (await getData('fd_templates')) || [];
     templates = templates.filter(t => t.id !== templateId);
-    saveData('fd_templates', templates);
+    await saveData('fd_templates', templates);
     
     loadTemplates();
     showToast('Template deleted', 'success');
@@ -309,7 +309,7 @@ function handleCSVImport() {
     
     const reader = new FileReader();
     
-    reader.onload = function(e) {
+    reader.onload = async function(e) {
         try {
             const csvText = e.target.result;
             const csvRecords = parseCSV(csvText);
@@ -320,7 +320,7 @@ function handleCSVImport() {
             }
             
             const accountHolder = document.getElementById('fdAccountHolder').value;
-            let records = getData('fd_records') || [];
+            let records = (await getData('fd_records')) || [];
             
             let importedCount = 0;
             
@@ -377,9 +377,9 @@ function handleCSVImport() {
 // Dashboard Functions
 // ===================================
 
-function updateDashboard() {
+async function updateDashboard() {
     const selectedHolder = document.getElementById('dashboardHolderFilter')?.value;
-    let records = getData('fd_records') || [];
+    let records = (await getData('fd_records')) || [];
     
     if (selectedHolder) {
         records = records.filter(r => r.accountHolder === selectedHolder);
@@ -558,7 +558,7 @@ function saveSettings() {
     showToast('Settings saved successfully', 'success');
 }
 
-function showChangePIN() {
+async function showChangePIN() {
     const oldPIN = prompt('Enter current PIN:');
     
     if (!oldPIN || !isValidPIN(oldPIN)) {
@@ -592,13 +592,16 @@ function showChangePIN() {
     localStorage.setItem('fd_pin', newHash);
     pinHash = newHash;
     
-    const holders = getData('fd_account_holders');
-    const records = getData('fd_records');
-    const templates = getData('fd_templates');
+    // Re-encrypt data with new PIN
+    await initDataManager(newPIN);
     
-    saveData('fd_account_holders', holders);
-    saveData('fd_records', records);
-    saveData('fd_templates', templates);
+    const holders = await getData('fd_account_holders');
+    const records = await getData('fd_records');
+    const templates = await getData('fd_templates');
+    
+    await saveData('fd_account_holders', holders);
+    await saveData('fd_records', records);
+    await saveData('fd_templates', templates);
     
     showToast('PIN changed successfully!', 'success');
 }
@@ -669,18 +672,18 @@ function clearDraft() {
 /**
  * Quick add new account holder
  */
-function quickAddHolder() {
+async function quickAddHolder() {
     const name = prompt('Enter account holder name:');
     if (!name || !name.trim()) return;
     
-    const holders = getData('fd_account_holders') || [];
+    const holders = (await getData('fd_account_holders')) || [];
     if (holders.includes(name.trim())) {
         showToast('Account holder already exists', 'warning');
         return;
     }
     
     holders.push(name.trim());
-    saveData('fd_account_holders', holders);
+    await saveData('fd_account_holders', holders);
     loadAccountHolders();
     
     document.getElementById('fdAccountHolder').value = name.trim();
@@ -976,8 +979,8 @@ function saveAndAddAnother() {
 /**
  * Show quick add modal
  */
-function showQuickAddModal() {
-    const holders = getData('fd_account_holders') || [];
+async function showQuickAddModal() {
+    const holders = (await getData('fd_account_holders')) || [];
     const select = document.getElementById('quickHolder');
     
     select.innerHTML = '<option value="">Select Holder</option>';
@@ -995,7 +998,7 @@ function showQuickAddModal() {
 /**
  * Save quick FD
  */
-function saveQuickFD(event) {
+async function saveQuickFD(event) {
     event.preventDefault();
     
     const holder = document.getElementById('quickHolder').value;
@@ -1023,12 +1026,12 @@ function saveQuickFD(event) {
         createdAt: new Date().toISOString()
     };
     
-    let records = getData('fd_records') || [];
+    let records = (await getData('fd_records')) || [];
     records.push(record);
-    saveData('fd_records', records);
+    await saveData('fd_records', records);
     
     loadFDRecords();
-    updateDashboard();
+    await updateDashboard();
     updateAnalytics();
     
     bootstrap.Modal.getInstance(document.getElementById('quickAddModal')).hide();
@@ -1040,8 +1043,8 @@ function saveQuickFD(event) {
 /**
  * Duplicate last FD
  */
-function duplicateLastFD() {
-    const records = getData('fd_records') || [];
+async function duplicateLastFD() {
+    const records = (await getData('fd_records')) || [];
     if (records.length === 0) {
         showToast('No FDs to duplicate', 'warning');
         return;
@@ -1068,8 +1071,8 @@ function duplicateLastFD() {
 /**
  * Show renewal helper
  */
-function showRenewalHelper() {
-    const records = getData('fd_records') || [];
+async function showRenewalHelper() {
+    const records = (await getData('fd_records')) || [];
     const select = document.getElementById('renewalFDSelect');
     
     select.innerHTML = '<option value="">Choose FD...</option>';
@@ -1088,14 +1091,14 @@ function showRenewalHelper() {
 /**
  * Load renewal details
  */
-function loadRenewalDetails() {
+async function loadRenewalDetails() {
     const fdId = document.getElementById('renewalFDSelect').value;
     if (!fdId) {
         document.getElementById('renewalDetails').style.display = 'none';
         return;
     }
     
-    const records = getData('fd_records') || [];
+    const records = (await getData('fd_records')) || [];
     const record = records.find(r => r.id === fdId);
     
     if (!record) return;
@@ -1121,9 +1124,9 @@ function loadRenewalDetails() {
 /**
  * Process renewal
  */
-function processRenewal() {
+async function processRenewal() {
     const fdId = document.getElementById('renewalFDSelect').value;
-    const records = getData('fd_records') || [];
+    const records = (await getData('fd_records')) || [];
     const originalRecord = records.find(r => r.id === fdId);
     
     if (!originalRecord) return;
@@ -1156,10 +1159,10 @@ function processRenewal() {
     };
     
     records.push(renewalRecord);
-    saveData('fd_records', records);
+    await saveData('fd_records', records);
     
     loadFDRecords();
-    updateDashboard();
+    await updateDashboard();
     updateAnalytics();
     
     bootstrap.Modal.getInstance(document.getElementById('renewalModal')).hide();
@@ -1174,14 +1177,17 @@ function loadRecentFDForHolder() {
     const holder = document.getElementById('fdAccountHolder').value;
     if (!holder) return;
     
-    const records = getData('fd_records') || [];
-    const holderRecords = records.filter(r => r.accountHolder === holder);
-    
-    if (holderRecords.length > 0) {
-        const recent = holderRecords[holderRecords.length - 1];
-        document.getElementById('fdBank').value = recent.bank;
-        suggestBankRate();
-    }
+    getData('fd_records').then(records => {
+        const holderRecords = (records || []).filter(r => r.accountHolder === holder);
+        
+        if (holderRecords.length > 0) {
+            const recent = holderRecords[holderRecords.length - 1];
+            document.getElementById('fdBank').value = recent.bank;
+            suggestBankRate();
+        }
+    }).catch(error => {
+        console.error('Error loading recent FD:', error);
+    });
 }
 
 /**

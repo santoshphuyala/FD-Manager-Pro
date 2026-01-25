@@ -4,14 +4,18 @@
 // Nepal Edition - Version 4.0 (Corrected)
 // ===================================
 
+// Global variables for pagination
+let currentPage = 1;
+const recordsPerPage = 10;
+
 // ===================================
 // Initialization
 // ===================================
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     checkLogin();
     loadSettings();
-    initializeEventListeners();
+    await initializeEventListeners();
 });
 
 // ===================================
@@ -38,7 +42,7 @@ function checkLogin() {
     if (mainApp) mainApp.style.display = 'none';
 }
 
-function setupPin() {
+async function setupPin() {
     const pinInput = document.getElementById('setupPin');
     const confirmInput = document.getElementById('confirmPin');
     
@@ -59,14 +63,17 @@ function setupPin() {
     localStorage.setItem('fd_pin', hash);
     pinHash = hash;
     
+    // Initialize data manager with PIN
+    await initDataManager(pin);
+    
     showToast('PIN created successfully!', 'success');
     
     // Initialize empty data
-    saveData('fd_account_holders', []);
-    saveData('fd_records', []);
-    saveData('fd_templates', []);
-    saveData('fd_comparisons', []);
-    saveData('fd_calculations', []);
+    await saveData('fd_account_holders', []);
+    await saveData('fd_records', []);
+    await saveData('fd_templates', []);
+    await saveData('fd_comparisons', []);
+    await saveData('fd_calculations', []);
     
     setTimeout(() => {
         const loginScreen = document.getElementById('loginScreen');
@@ -79,7 +86,7 @@ function setupPin() {
     }, 500);
 }
 
-function login() {
+async function login() {
     const pinInput = document.getElementById('loginPin');
     const pin = pinInput?.value || '';
     
@@ -98,6 +105,9 @@ function login() {
     }
     
     pinHash = hash;
+    
+    // Initialize data manager with PIN
+    await initDataManager(pin);
     
     const loginScreen = document.getElementById('loginScreen');
     const mainApp = document.getElementById('mainApp');
@@ -121,11 +131,12 @@ function logout() {
     }
 }
 
-function showResetConfirm() {
+async function showResetConfirm() {
     const confirmation = prompt('⚠️ WARNING: This will delete ALL data!\n\nType "RESET" to confirm:');
     
     if (confirmation === 'RESET') {
-        localStorage.clear();
+        localStorage.clear(); // Clear PIN
+        await clearAllData(); // Clear encrypted data
         showToast('All data cleared. Please set up new PIN.', 'success');
         setTimeout(() => {
             location.reload();
@@ -139,12 +150,13 @@ function showResetConfirm() {
 // App Initialization
 // ===================================
 
-function initializeApp() {
+async function initializeApp() {
+    showLoading();
     try {
-        loadAccountHolders();
-        loadFDRecords();
-        loadTemplates();
-        updateDashboard();
+        await loadAccountHolders();
+        await loadFDRecords();
+        await loadTemplates();
+        await updateDashboard();
         if (typeof updateAnalytics === 'function') updateAnalytics();
         populateSettings();
         
@@ -153,14 +165,19 @@ function initializeApp() {
             loadCertificates();
         }
         
+        // Check for expiring FDs
+        checkExpiringFDs();
+        
         showToast('Welcome to FD Manager Pro - Nepal Edition!', 'success');
     } catch (error) {
         console.error('App initialization error:', error);
         showToast('Error loading data. Please refresh.', 'error');
+    } finally {
+        hideLoading();
     }
 }
 
-function initializeEventListeners() {
+async function initializeEventListeners() {
     // Login form keyboard navigation
     const loginPin = document.getElementById('loginPin');
     if (loginPin) {
@@ -187,7 +204,7 @@ function initializeEventListeners() {
     }
     
     // Bank autocomplete
-    setupBankAutocomplete();
+    await setupBankAutocomplete();
     
     // Search with debounce
     const searchInput = document.getElementById('searchRecords');
@@ -226,8 +243,8 @@ function setupFormAutoSave() {
 // Account Holder Management
 // ===================================
 
-function loadAccountHolders() {
-    const holders = getData('fd_account_holders') || [];
+async function loadAccountHolders() {
+    const holders = (await getData('fd_account_holders')) || [];
     
     const dropdowns = [
         'fdAccountHolder',
@@ -291,7 +308,7 @@ function updateAccountHoldersList(holders) {
     });
 }
 
-function addAccountHolder(event) {
+async function addAccountHolder(event) {
     if (event) event.preventDefault();
     
     const input = document.getElementById('newAccountHolder');
@@ -302,7 +319,7 @@ function addAccountHolder(event) {
         return;
     }
     
-    const holders = getData('fd_account_holders') || [];
+    const holders = (await getData('fd_account_holders')) || [];
     
     // Case-insensitive duplicate check
     if (holders.some(h => h.toLowerCase() === name.toLowerCase())) {
@@ -311,7 +328,7 @@ function addAccountHolder(event) {
     }
     
     holders.push(name);
-    saveData('fd_account_holders', holders);
+    await saveData('fd_account_holders', holders);
     
     loadAccountHolders();
     if (input) input.value = '';
@@ -319,19 +336,19 @@ function addAccountHolder(event) {
     showToast(`Account holder "${name}" added successfully`, 'success');
 }
 
-function deleteAccountHolder(name) {
+async function deleteAccountHolder(name) {
     if (!confirm(`Delete account holder "${name}"?\n\nThis will also delete all associated FD records.`)) {
         return;
     }
     
-    let holders = getData('fd_account_holders') || [];
+    let holders = (await getData('fd_account_holders')) || [];
     holders = holders.filter(h => h !== name);
-    saveData('fd_account_holders', holders);
+    await saveData('fd_account_holders', holders);
     
-    let records = getData('fd_records') || [];
+    let records = (await getData('fd_records')) || [];
     const deletedCount = records.filter(r => r.accountHolder === name).length;
     records = records.filter(r => r.accountHolder !== name);
-    saveData('fd_records', records);
+    await saveData('fd_records', records);
     
     loadAccountHolders();
     loadFDRecords();
@@ -344,17 +361,19 @@ function deleteAccountHolder(name) {
 // FD Records Management
 // ===================================
 
-function loadFDRecords() {
-    const records = getData('fd_records') || [];
-    displayFDRecords(records);
+async function loadFDRecords() {
+    const records = (await getData('fd_records')) || [];
+    displayFDRecords(records, 1);
 }
 
-function displayFDRecords(records) {
+function displayFDRecords(records, page = 1) {
+    currentPage = page;
     const tbody = document.getElementById('recordsTableBody');
     if (!tbody) return;
     
     if (!records || records.length === 0) {
         tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted">No records found</td></tr>';
+        document.getElementById('recordsPagination').innerHTML = '';
         return;
     }
     
@@ -362,10 +381,17 @@ function displayFDRecords(records) {
     
     if (records.length === 0) {
         tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted">No matching records found</td></tr>';
+        document.getElementById('recordsPagination').innerHTML = '';
         return;
     }
     
-    tbody.innerHTML = records.map(record => {
+    // Pagination
+    const totalPages = Math.ceil(records.length / recordsPerPage);
+    const startIndex = (page - 1) * recordsPerPage;
+    const endIndex = startIndex + recordsPerPage;
+    const paginatedRecords = records.slice(startIndex, endIndex);
+    
+    tbody.innerHTML = paginatedRecords.map(record => {
         const maturityDate = record.maturityDate || calculateMaturityDate(
             record.startDate, record.duration, record.durationUnit
         );
@@ -405,6 +431,46 @@ function displayFDRecords(records) {
             </tr>
         `;
     }).join('');
+    
+    // Render pagination
+    renderPagination(totalPages, page);
+}
+
+function renderPagination(totalPages, currentPage) {
+    const paginationEl = document.getElementById('recordsPagination');
+    if (totalPages <= 1) {
+        paginationEl.innerHTML = '';
+        return;
+    }
+    
+    let paginationHtml = '<nav><ul class="pagination">';
+    
+    // Previous button
+    paginationHtml += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="changePage(${currentPage - 1})">Previous</a>
+    </li>`;
+    
+    // Page numbers
+    for (let i = 1; i <= totalPages; i++) {
+        if (i === currentPage) {
+            paginationHtml += `<li class="page-item active"><span class="page-link">${i}</span></li>`;
+        } else {
+            paginationHtml += `<li class="page-item"><a class="page-link" href="#" onclick="changePage(${i})">${i}</a></li>`;
+        }
+    }
+    
+    // Next button
+    paginationHtml += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="changePage(${currentPage + 1})">Next</a>
+    </li>`;
+    
+    paginationHtml += '</ul></nav>';
+    paginationEl.innerHTML = paginationHtml;
+}
+
+async function changePage(page) {
+    const records = (await getData('fd_records')) || [];
+    displayFDRecords(records, page);
 }
 
 function applyRecordFilters(records) {
@@ -463,7 +529,7 @@ function filterRecords() {
 /**
  * Save FD record (handles both add and edit)
  */
-function saveFD(event) {
+async function saveFD(event) {
     if (event) event.preventDefault();
     
     // Get form values
@@ -479,18 +545,23 @@ function saveFD(event) {
     const notes = document.getElementById('fdNotes')?.value || '';
     
     // Validation
-    if (!accountHolder) {
-        showToast('Please select an account holder', 'error');
+    if (!isValidAccountHolder(accountHolder)) {
+        showToast('Please select a valid account holder', 'error');
         return;
     }
     
-    if (!bank || !amount || !duration || !rate || !startDate) {
-        showToast('Please fill all required fields', 'error');
+    if (!isValidBank(bank)) {
+        showToast('Please enter a valid bank name', 'error');
         return;
     }
     
     if (!isValidAmount(amount)) {
-        showToast('Please enter a valid amount', 'error');
+        showToast('Please enter a valid amount (greater than 0)', 'error');
+        return;
+    }
+    
+    if (!isValidDuration(duration)) {
+        showToast('Please enter a valid duration (1-999)', 'error');
         return;
     }
     
@@ -510,9 +581,9 @@ function saveFD(event) {
     /**
      * Complete the save operation
      */
-    const completeSave = (certData) => {
+    const completeSave = async (certData) => {
         try {
-            let records = getData('fd_records') || [];
+            let records = (await getData('fd_records')) || [];
             
             const record = {
                 id: currentEditId || generateId(),
@@ -547,7 +618,7 @@ function saveFD(event) {
                 records.push(record);
             }
             
-            saveData('fd_records', records);
+            await saveData('fd_records', records);
             
             // Refresh UI
             loadFDRecords();
@@ -588,7 +659,7 @@ function saveFD(event) {
         // Keep existing certificate if editing
         let existingCert = null;
         if (currentEditId) {
-            const records = getData('fd_records') || [];
+            const records = (await getData('fd_records')) || [];
             const existing = records.find(r => r.id === currentEditId);
             existingCert = existing?.certificate || null;
         }
@@ -641,8 +712,8 @@ function resetFDForm() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function editFD(id) {
-    const records = getData('fd_records') || [];
+async function editFD(id) {
+    const records = (await getData('fd_records')) || [];
     const record = records.find(r => r.id === id);
     
     if (!record) {
@@ -711,25 +782,25 @@ function cancelEdit() {
     showToast('Edit cancelled', 'info');
 }
 
-function deleteFD(id) {
+async function deleteFD(id) {
     if (!confirm('Are you sure you want to delete this FD record?')) {
         return;
     }
     
-    let records = getData('fd_records') || [];
+    let records = (await getData('fd_records')) || [];
     const recordToDelete = records.find(r => r.id === id);
     records = records.filter(r => r.id !== id);
-    saveData('fd_records', records);
+    await saveData('fd_records', records);
     
     loadFDRecords();
-    updateDashboard();
+    await updateDashboard();
     if (typeof updateAnalytics === 'function') updateAnalytics();
     
     const bankInfo = recordToDelete ? ` (${recordToDelete.bank})` : '';
     showToast(`FD deleted successfully${bankInfo}`, 'success');
 }
 
-function deleteSelected() {
+async function deleteSelected() {
     const checkboxes = document.querySelectorAll('.record-checkbox:checked');
     
     if (checkboxes.length === 0) {
@@ -742,12 +813,12 @@ function deleteSelected() {
     }
     
     const idsToDelete = Array.from(checkboxes).map(cb => cb.value);
-    let records = getData('fd_records') || [];
+    let records = (await getData('fd_records')) || [];
     records = records.filter(r => !idsToDelete.includes(r.id));
-    saveData('fd_records', records);
+    await saveData('fd_records', records);
     
     loadFDRecords();
-    updateDashboard();
+    await updateDashboard();
     if (typeof updateAnalytics === 'function') updateAnalytics();
     
     showToast(`${checkboxes.length} record(s) deleted`, 'success');
@@ -822,14 +893,14 @@ function updateInterestPreview() {
 // Bank Autocomplete
 // ===================================
 
-function setupBankAutocomplete() {
+async function setupBankAutocomplete() {
     const bankInput = document.getElementById('fdBank');
     const datalist = document.getElementById('bankSuggestions');
     
     if (!bankInput || !datalist) return;
     
     // Populate initial suggestions
-    const banks = getAllBanks();
+    const banks = await getAllBanks();
     datalist.innerHTML = '';
     banks.forEach(bank => {
         const option = document.createElement('option');
@@ -838,8 +909,8 @@ function setupBankAutocomplete() {
     });
     
     // Update suggestions on input
-    bankInput.addEventListener('input', function() {
-        const suggestions = getAllBanks();
+    bankInput.addEventListener('input', async function() {
+        const suggestions = await getAllBanks();
         datalist.innerHTML = '';
         suggestions.forEach(bank => {
             const option = document.createElement('option');
@@ -861,7 +932,7 @@ function setupBankAutocomplete() {
 let sortColumn = '';
 let sortAscending = true;
 
-function sortTable(column) {
+async function sortTable(column) {
     if (sortColumn === column) {
         sortAscending = !sortAscending;
     } else {
@@ -869,7 +940,7 @@ function sortTable(column) {
         sortAscending = true;
     }
     
-    let records = getData('fd_records') || [];
+    let records = (await getData('fd_records')) || [];
     
     records = records.sort((a, b) => {
         let valA, valB;
@@ -998,6 +1069,47 @@ Are you sure you want to continue?`;
     } catch (error) {
         console.error('Error loading sample data:', error);
         showToast('❌ Failed to load sample data', 'error');
+    }
+}
+
+// ===================================
+// Loading States
+// ===================================
+
+function showLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.style.display = 'flex';
+}
+
+function hideLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+// ===================================
+// Notifications for Expiring FDs
+// ===================================
+
+async function checkExpiringFDs() {
+    if ('Notification' in window) {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+            const records = (await getData('fd_records')) || [];
+            const expiringSoon = records.filter(record => {
+                const maturityDate = record.maturityDate || calculateMaturityDate(
+                    record.startDate, record.duration, record.durationUnit
+                );
+                const daysRemaining = calculateDaysRemaining(maturityDate);
+                return daysRemaining !== null && daysRemaining <= 30 && daysRemaining > 0;
+            });
+            
+            if (expiringSoon.length > 0) {
+                new Notification('FD Manager Pro', {
+                    body: `${expiringSoon.length} FD(s) expiring within 30 days`,
+                    icon: 'images/icon-192x192.png'
+                });
+            }
+        }
     }
 }
 
