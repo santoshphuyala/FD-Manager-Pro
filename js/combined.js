@@ -85,6 +85,7 @@ async function setupPin() {
     // Initialize empty data
     await saveData('fd_account_holders', []);
     await saveData('fd_records', []);
+    await saveData('fd_matured_records', []);
     await saveData('fd_templates', []);
     await saveData('fd_comparisons', []);
     await saveData('fd_calculations', []);
@@ -169,6 +170,7 @@ async function initializeApp() {
     try {
         await loadAccountHolders();
         await loadFDRecords();
+        await loadMaturedFDRecords(); // Load matured records with filtering
         await loadTemplates();
         await updateDashboard();
         if (typeof updateAnalytics === 'function') await updateAnalytics();
@@ -518,12 +520,20 @@ async function deleteAccountHolder(name) {
     records = records.filter(r => r.accountHolder !== name);
     await saveData('fd_records', records);
     
+    // Also delete from matured records
+    let maturedRecords = (await getData('fd_matured_records')) || [];
+    const deletedMaturedCount = maturedRecords.filter(r => r.accountHolder === name).length;
+    maturedRecords = maturedRecords.filter(r => r.accountHolder !== name);
+    await saveData('fd_matured_records', maturedRecords);
+    
     loadAccountHolders();
     await loadAccountHoldersForCalc(); // Refresh calculator dropdown
     loadFDRecords();
+    await loadMaturedFDRecords(); // Refresh matured records
     updateDashboard();
     
-    showToast(`Account holder "${name}" deleted (${deletedCount} records removed)`, 'success');
+    const totalDeleted = deletedCount + deletedMaturedCount;
+    showToast(`Account holder "${name}" deleted (${totalDeleted} records removed: ${deletedCount} active, ${deletedMaturedCount} matured)`, 'success');
 }
 
 async function toggleAccountHolder(name, enabled) {
@@ -551,6 +561,7 @@ async function toggleAccountHolder(name, enabled) {
     loadAccountHolders();
     await loadAccountHoldersForCalc(); // Refresh calculator dropdown
     loadFDRecords();
+    await loadMaturedFDRecords(); // Refresh matured records
     await updateDashboard();
     if (typeof updateAnalytics === 'function') await updateAnalytics();
     
@@ -601,6 +612,9 @@ async function isAccountHolderEnabled(holderName) {
 // ===================================
 
 async function loadFDRecords() {
+    // First check for any matured FDs and move them
+    await checkAndMoveMaturedFDs();
+    
     const records = (await getData('fd_records')) || [];
     
     // Filter out records for disabled account holders
@@ -770,8 +784,6 @@ function applyRecordFilters(records) {
                     return status === 'Active';
                 case 'expiring':
                     return status === 'Expiring Soon';
-                case 'matured':
-                    return status === 'Matured';
                 default:
                     return true;
             }
@@ -988,6 +1000,390 @@ function resetFDForm() {
     // Scroll to top
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+
+// ===================================
+// Matured Records Management
+// ===================================
+
+/**
+ * Check for matured FDs and move them to matured records
+ */
+async function checkAndMoveMaturedFDs() {
+    try {
+        const records = (await getData('fd_records')) || [];
+        const maturedRecords = (await getData('fd_matured_records')) || [];
+        const today = new Date();
+        
+        const recordsToMove = [];
+        const remainingRecords = [];
+        
+        for (const record of records) {
+            const maturityDate = new Date(record.maturityDate);
+            if (maturityDate <= today) {
+                // Add matured date and move to matured records
+                record.maturedDate = today.toISOString().split('T')[0];
+                record.status = 'Matured';
+                recordsToMove.push(record);
+            } else {
+                remainingRecords.push(record);
+            }
+        }
+        
+        if (recordsToMove.length > 0) {
+            // Update active records
+            await saveData('fd_records', remainingRecords);
+            
+            // Add to matured records
+            const updatedMaturedRecords = [...maturedRecords, ...recordsToMove];
+            await saveData('fd_matured_records', updatedMaturedRecords);
+            
+            showToast(`Moved ${recordsToMove.length} matured FD(s) to matured records`, 'info');
+        }
+    } catch (error) {
+        console.error('Error checking matured FDs:', error);
+    }
+}
+
+/**
+ * Load matured FD records
+ */
+async function loadMaturedFDRecords() {
+    try {
+        let maturedRecords = (await getData('fd_matured_records')) || [];
+        
+        // Filter out records for disabled account holders
+        maturedRecords = await filterRecordsByAccountHolderStatus(maturedRecords);
+        
+        displayMaturedFDRecords(maturedRecords, 1);
+    } catch (error) {
+        console.error('Error loading matured FD records:', error);
+    }
+}
+
+/**
+ * Display matured FD records in table
+ */
+function displayMaturedFDRecords(records, page = 1) {
+    const tbody = document.getElementById('maturedRecordsTableBody');
+    if (!tbody) return;
+    
+    if (!records || records.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="11" class="text-center text-muted">No matured records found</td></tr>';
+        return;
+    }
+    
+    // Sort by matured date (newest first)
+    records.sort((a, b) => new Date(b.maturedDate || b.maturityDate) - new Date(a.maturedDate || a.maturityDate));
+    
+    // Pagination
+    const totalPages = Math.ceil(records.length / recordsPerPage);
+    const startIndex = (page - 1) * recordsPerPage;
+    const endIndex = startIndex + recordsPerPage;
+    const paginatedRecords = records.slice(startIndex, endIndex);
+    
+    tbody.innerHTML = paginatedRecords.map(record => {
+        const interest = calculateInterestForRecord(record);
+        const maturedDate = record.maturedDate || record.maturityDate;
+        
+        // Escape all user-provided data
+        const safeId = escapeHtml(record.id);
+        const safeHolder = escapeHtml(record.accountHolder);
+        const safeBank = escapeHtml(record.bank);
+        const safeUnit = escapeHtml(record.durationUnit);
+        
+        return `
+            <tr>
+                <td><input type="checkbox" class="matured-record-checkbox" value="${safeId}"></td>
+                <td>${safeHolder}</td>
+                <td>${safeBank}</td>
+                <td>${formatCurrency(record.amount)}</td>
+                <td>${record.duration} ${safeUnit}</td>
+                <td>${record.rate}%</td>
+                <td>${formatDate(record.startDate)}</td>
+                <td>${formatDate(record.maturityDate)}</td>
+                <td>${formatDate(maturedDate)}</td>
+                <td>${formatCurrency(interest)}</td>
+                <td>
+                    <button class="btn btn-sm btn-info" onclick="viewMaturedFD('${safeId}')" title="View">
+                        <i class="bi bi-eye-fill"></i>
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteMaturedFD('${safeId}')" title="Delete">
+                        <i class="bi bi-trash-fill"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+    
+    // Update pagination
+    updateMaturedRecordsPagination(totalPages, page);
+}
+
+/**
+ * Update pagination for matured records
+ */
+function updateMaturedRecordsPagination(totalPages, currentPage) {
+    const pagination = document.getElementById('maturedRecordsPagination');
+    if (!pagination) return;
+    
+    let html = '';
+    
+    if (totalPages > 1) {
+        // Previous button
+        html += `<button class="btn btn-sm btn-outline-primary me-1" onclick="displayMaturedFDRecords(maturedRecords, ${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>Previous</button>`;
+        
+        // Page numbers
+        for (let i = 1; i <= totalPages; i++) {
+            if (i === currentPage) {
+                html += `<button class="btn btn-sm btn-primary me-1">${i}</button>`;
+            } else {
+                html += `<button class="btn btn-sm btn-outline-primary me-1" onclick="displayMaturedFDRecords(maturedRecords, ${i})">${i}</button>`;
+            }
+        }
+        
+        // Next button
+        html += `<button class="btn btn-sm btn-outline-primary" onclick="displayMaturedFDRecords(maturedRecords, ${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>Next</button>`;
+    }
+    
+    pagination.innerHTML = html;
+}
+
+/**
+ * View matured FD details
+ */
+async function viewMaturedFD(id) {
+    const maturedRecords = (await getData('fd_matured_records')) || [];
+    const record = maturedRecords.find(r => r.id === id);
+    
+    if (!record) {
+        showToast('Matured record not found', 'error');
+        return;
+    }
+    
+    // Show record details in a modal or alert
+    const interest = calculateInterestForRecord(record);
+    const details = `
+Account Holder: ${record.accountHolder}
+Bank: ${record.bank}
+Amount: ${formatCurrency(record.amount)}
+Duration: ${record.duration} ${record.durationUnit}
+Rate: ${record.rate}%
+Start Date: ${formatDate(record.startDate)}
+Maturity Date: ${formatDate(record.maturityDate)}
+Matured Date: ${formatDate(record.maturedDate || record.maturityDate)}
+Expected Interest: ${formatCurrency(interest)}
+Maturity Amount: ${formatCurrency(record.amount + interest)}
+Notes: ${record.notes || 'N/A'}
+    `;
+    
+    alert(details.trim());
+}
+
+/**
+ * Delete matured FD record
+ */
+async function deleteMaturedFD(id) {
+    if (!confirm('Are you sure you want to delete this matured FD record?')) {
+        return;
+    }
+    
+    try {
+        const maturedRecords = (await getData('fd_matured_records')) || [];
+        const filteredRecords = maturedRecords.filter(r => r.id !== id);
+        
+        await saveData('fd_matured_records', filteredRecords);
+        loadMaturedFDRecords();
+        showToast('Matured record deleted successfully', 'success');
+    } catch (error) {
+        console.error('Error deleting matured record:', error);
+        showToast('Error deleting matured record', 'error');
+    }
+}
+
+/**
+ * Restore matured FD to active records (for manual restoration)
+ */
+async function restoreMaturedFD(id) {
+    if (!confirm('Are you sure you want to restore this matured FD to active records?')) {
+        return;
+    }
+    
+    try {
+        const maturedRecords = (await getData('fd_matured_records')) || [];
+        const activeRecords = (await getData('fd_records')) || [];
+        
+        const recordToRestore = maturedRecords.find(r => r.id === id);
+        if (!recordToRestore) {
+            showToast('Matured record not found', 'error');
+            return;
+        }
+        
+        // Remove matured status and date
+        delete recordToRestore.maturedDate;
+        recordToRestore.status = 'Active';
+        
+        // Add to active records
+        activeRecords.push(recordToRestore);
+        await saveData('fd_records', activeRecords);
+        
+        // Remove from matured records
+        const filteredMaturedRecords = maturedRecords.filter(r => r.id !== id);
+        await saveData('fd_matured_records', filteredMaturedRecords);
+        
+        loadMaturedFDRecords();
+        loadFDRecords();
+        showToast('FD restored to active records successfully', 'success');
+    } catch (error) {
+        console.error('Error restoring matured FD:', error);
+        showToast('Error restoring matured FD', 'error');
+    }
+}
+
+// ===================================
+// Matured Records Table Functions
+// ===================================
+
+/**
+ * Filter matured records based on search input
+ */
+function filterMaturedRecords() {
+    const searchInput = document.getElementById('searchMaturedRecords');
+    const searchTerm = searchInput?.value?.toLowerCase() || '';
+    
+    if (!searchTerm) {
+        loadMaturedFDRecords();
+        return;
+    }
+    
+    // This will need to be implemented to filter the displayed records
+    loadMaturedFDRecords();
+}
+
+/**
+ * Toggle select all matured records
+ */
+function toggleSelectAllMatured() {
+    const selectAll = document.getElementById('selectAllMatured');
+    const checkboxes = document.querySelectorAll('.matured-record-checkbox');
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAll.checked;
+    });
+    
+    updateDeleteSelectedMaturedButton();
+}
+
+/**
+ * Update delete selected button state for matured records
+ */
+function updateDeleteSelectedMaturedButton() {
+    const checkboxes = document.querySelectorAll('.matured-record-checkbox:checked');
+    const deleteBtn = document.getElementById('deleteSelectedMaturedBtn');
+    
+    if (deleteBtn) {
+        deleteBtn.disabled = checkboxes.length === 0;
+    }
+}
+
+/**
+ * Delete selected matured records
+ */
+async function deleteSelectedMatured() {
+    const checkboxes = document.querySelectorAll('.matured-record-checkbox:checked');
+    
+    if (checkboxes.length === 0) {
+        showToast('No matured records selected', 'warning');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete ${checkboxes.length} matured record(s)?`)) {
+        return;
+    }
+    
+    try {
+        const maturedRecords = (await getData('fd_matured_records')) || [];
+        const idsToDelete = Array.from(checkboxes).map(cb => cb.value);
+        
+        const filteredRecords = maturedRecords.filter(r => !idsToDelete.includes(r.id));
+        
+        await saveData('fd_matured_records', filteredRecords);
+        loadMaturedFDRecords();
+        showToast(`Deleted ${checkboxes.length} matured record(s) successfully`, 'success');
+    } catch (error) {
+        console.error('Error deleting selected matured records:', error);
+        showToast('Error deleting matured records', 'error');
+    }
+}
+
+/**
+ * Change records per page for matured records
+ */
+function changeMaturedRecordsPerPage(value) {
+    recordsPerPage = parseInt(value);
+    localStorage.setItem('recordsPerPage', value);
+    loadMaturedFDRecords();
+}
+
+/**
+ * Export matured records to Excel
+ */
+async function exportMaturedToExcel() {
+    try {
+        const maturedRecords = (await getData('fd_matured_records')) || [];
+        
+        if (maturedRecords.length === 0) {
+            showToast('No matured records to export', 'warning');
+            return;
+        }
+        
+        // Create CSV content
+        let csvContent = 'Account Holder,Bank,Amount,Duration,Rate (%),Start Date,Maturity Date,Matured Date,Interest,Maturity Amount,Notes\n';
+        
+        maturedRecords.forEach(record => {
+            const interest = calculateInterestForRecord(record);
+            const maturityAmount = record.amount + interest;
+            const maturedDate = record.maturedDate || record.maturityDate;
+            
+            csvContent += `"${record.accountHolder}","${record.bank}",${record.amount},"${record.duration} ${record.durationUnit}",${record.rate},"${record.startDate}","${record.maturityDate}","${maturedDate}",${interest},${maturityAmount},"${record.notes || ''}"\n`;
+        });
+        
+        // Create and download file
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        
+        link.setAttribute('href', url);
+        link.setAttribute('download', `matured_fd_records_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        showToast('Matured records exported successfully', 'success');
+    } catch (error) {
+        console.error('Error exporting matured records:', error);
+        showToast('Error exporting matured records', 'error');
+    }
+}
+
+// Add event listener for matured tab to load records when tab is opened
+document.addEventListener('DOMContentLoaded', function() {
+    // Add event listener for matured tab
+    const maturedTab = document.getElementById('matured-tab');
+    if (maturedTab) {
+        maturedTab.addEventListener('shown.bs.tab', function() {
+            loadMaturedFDRecords();
+        });
+    }
+    
+    // Add event listeners for matured record checkboxes
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('matured-record-checkbox')) {
+            updateDeleteSelectedMaturedButton();
+        }
+    });
+});
 
 async function editFD(id) {
     const records = (await getData('fd_records')) || [];
@@ -1685,6 +2081,9 @@ async function deleteTemplate(templateId) {
 // ===================================
 
 async function updateDashboard() {
+    // First check for any matured FDs and move them
+    await checkAndMoveMaturedFDs();
+    
     const selectedHolder = document.getElementById('dashboardHolderFilter')?.value;
     let records = (await getData('fd_records')) || [];
     
