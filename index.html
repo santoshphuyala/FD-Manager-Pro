@@ -600,9 +600,6 @@
                         <button class="btn btn-sm btn-primary" onclick="exportAllPDF()">
                             <i class="bi bi-file-pdf"></i> Export to PDF
                         </button>
-                        <button class="btn btn-sm btn-info" onclick="importCSV()">
-                            <i class="bi bi-upload"></i> Import CSV
-                        </button>
                     </div>
                     <div class="d-flex align-items-center">
                         <label for="recordsPerPageSelect" class="form-label me-2 mb-0 small">Records per page:</label>
@@ -1360,56 +1357,6 @@
                     </div>
                 </div>
 
-                <!-- Enhanced CSV Import/Export -->
-                <div class="card mb-3">
-                    <div class="card-header bg-success text-white">
-                        <i class="bi bi-file-earmark-spreadsheet"></i> CSV Import/Export
-                    </div>
-                    <div class="card-body">
-                        <!-- CSV Import Section -->
-                        <h6 class="mb-3">
-                            <i class="bi bi-upload"></i> Import from CSV
-                        </h6>
-                        <div class="mb-3">
-                            <label for="bulkCSVImportFile" class="form-label small text-muted">
-                                Select CSV File
-                            </label>
-                            <input type="file" 
-                                   id="bulkCSVImportFile" 
-                                   accept=".csv" 
-                                   class="form-control form-control-sm">
-                            <div class="form-text">
-                                Format: accountHolder, bank, amount, duration, unit, rate, startDate, maturityDate, certificateStatus, notes
-                            </div>
-                        </div>
-                        <button class="btn btn-primary w-100 mb-2" 
-                                onclick="handleBulkCSVImportSmart()">
-                            <i class="bi bi-file-earmark-arrow-up"></i> Smart Import CSV
-                        </button>
-                        <div class="alert alert-success alert-sm mb-3">
-                            <i class="bi bi-shield-check"></i> <small><strong>Smart Import Features:</strong></small>
-                            <ul class="mb-0 mt-1 small">
-                                <li>Automatically detects duplicate records</li>
-                                <li>Shows preview before importing</li>
-                                <li>Choose to add new only or update existing</li>
-                            </ul>
-                        </div>
-
-                        <hr>
-
-                        <!-- CSV Export Section -->
-                        <h6 class="mb-3">
-                            <i class="bi bi-download"></i> Export to CSV
-                        </h6>
-                        <button class="btn btn-success w-100" onclick="exportAllToCSV()">
-                            <i class="bi bi-download"></i> Export All Records to CSV
-                        </button>
-                        <small class="text-muted d-block mt-2">
-                            <i class="bi bi-info-circle"></i> Downloads all FD records in CSV format
-                        </small>
-                    </div>
-                </div>
-
                 <!-- Security Settings -->
                 <div class="card mb-3">
                     <div class="card-header bg-warning text-dark">
@@ -1440,8 +1387,11 @@
                         <p class="text-muted small">
                             Complete backup including all FDs, account holders, templates, and settings.
                         </p>
-                        <button class="btn btn-success w-100 mb-3" onclick="backupData()">
+                        <button class="btn btn-success w-100 mb-2" onclick="backupData()">
                             <i class="bi bi-download"></i> Download Full Backup (JSON)
+                        </button>
+                        <button class="btn btn-primary w-100 mb-3" onclick="backupDataToExcel()">
+                            <i class="bi bi-file-earmark-excel"></i> Download Excel Backup
                         </button>
 
                         <hr>
@@ -1450,19 +1400,33 @@
                         <h6 class="mb-3">
                             <i class="bi bi-cloud-arrow-up"></i> Restore from Backup
                         </h6>
+                        
+                        <!-- JSON Restore -->
                         <div class="mb-3">
-                            <label for="restoreFile" class="form-label small text-muted">
-                                Select Backup File
-                            </label>
+                            <label class="form-label small text-muted">JSON Backup Restore</label>
                             <input type="file" 
                                    id="restoreFile" 
                                    accept=".json" 
-                                   class="form-control form-control-sm">
+                                   class="form-control form-control-sm mb-2">
+                            <button class="btn btn-warning w-100 mb-2" 
+                                    onclick="restoreDataSmart()">
+                                <i class="bi bi-arrow-counterclockwise"></i> Restore JSON Backup
+                            </button>
                         </div>
-                        <button class="btn btn-warning w-100 mb-2" 
-                                onclick="restoreDataSmart()">
-                            <i class="bi bi-arrow-counterclockwise"></i> Smart Restore Backup
-                        </button>
+
+                        <!-- Excel Restore -->
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">Excel Backup Restore</label>
+                            <input type="file" 
+                                   id="excelRestoreFile" 
+                                   accept=".xlsx,.xls" 
+                                   class="form-control form-control-sm mb-2">
+                            <button class="btn btn-info w-100 mb-2" 
+                                    onclick="handleExcelRestore()">
+                                <i class="bi bi-file-earmark-excel"></i> Restore Excel Backup
+                            </button>
+                        </div>
+
                         <div class="alert alert-info alert-sm mb-3">
                             <i class="bi bi-shield-check"></i> <small><strong>Smart Restore Features:</strong></small>
                             <ul class="mb-0 mt-1 small">
@@ -1556,9 +1520,6 @@
         </div>
     </div>
 </div>
-
-    <!-- CSV Import Hidden Input -->
-    <input type="file" id="csvFileInput" accept=".csv" style="display:none;" onchange="handleCSVImport()">
 
     <!-- External JavaScript Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
