@@ -4269,7 +4269,7 @@ function restoreDataSmart() {
     
     const reader = new FileReader();
     
-    reader.onload = function(e) {
+    reader.onload = async function(e) {
         try {
             const data = JSON.parse(e.target.result);
             
@@ -4279,14 +4279,15 @@ function restoreDataSmart() {
             }
             
             const importRecords = data.records || [];
-            const existingRecords = getData('fd_records') || [];
+            const existingRecordsRaw = await getData('fd_records');
+            const existingRecords = Array.isArray(existingRecordsRaw) ? existingRecordsRaw : [];
             
             // Analyze import data
             const analysis = analyzeImportData(importRecords, existingRecords);
             
             // Show preview dialog
-            showImportPreview(analysis, function(selectedOption, analysisData) {
-                processSmartRestore(selectedOption, analysisData, data, fileInput);
+            showImportPreview(analysis, async function(selectedOption, analysisData) {
+                await processSmartRestore(selectedOption, analysisData, data, fileInput);
             });
             
         } catch (error) {
@@ -4302,11 +4303,15 @@ function restoreDataSmart() {
 /**
  * Process restore based on user selection
  */
-function processSmartRestore(option, analysis, backupData, fileInput) {
+async function processSmartRestore(option, analysis, backupData, fileInput) {
     try {
-        let records = getData('fd_records') || [];
-        let holders = getData('fd_account_holders') || [];
-        let templates = getData('fd_templates') || [];
+        let recordsRaw = await getData('fd_records');
+        let holdersRaw = await getData('fd_account_holders');
+        let templatesRaw = await getData('fd_templates');
+        
+        let records = Array.isArray(recordsRaw) ? recordsRaw : [];
+        let holders = Array.isArray(holdersRaw) ? holdersRaw : [];
+        let templates = Array.isArray(templatesRaw) ? templatesRaw : [];
         
         const beforeCount = records.length;
         let addedCount = 0;
