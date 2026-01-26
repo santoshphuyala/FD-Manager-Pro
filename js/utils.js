@@ -1023,112 +1023,6 @@ function loadSettings() {
 /**
  * Parse CSV text to array of objects
  */
-function parseCSV(csvText) {
-    if (!csvText || typeof csvText !== 'string') return [];
-    
-    try {
-        const lines = csvText.split('\n').filter(line => line.trim());
-        if (lines.length < 2) return [];
-        
-        // Parse headers - normalize to lowercase
-        const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/\s+/g, ''));
-        const records = [];
-        
-        for (let i = 1; i < lines.length; i++) {
-            // Handle quoted values in CSV
-            const values = parseCSVLine(lines[i]);
-            const record = {};
-            
-            headers.forEach((header, index) => {
-                record[header] = values[index]?.trim() || '';
-            });
-            
-            records.push(record);
-        }
-        
-        return records;
-    } catch (error) {
-        console.error('CSV parse error:', error);
-        return [];
-    }
-}
-
-/**
- * Parse a single CSV line (handles quoted values)
- */
-function parseCSVLine(line) {
-    const result = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        
-        if (char === '"') {
-            if (inQuotes && line[i + 1] === '"') {
-                current += '"';
-                i++;
-            } else {
-                inQuotes = !inQuotes;
-            }
-        } else if (char === ',' && !inQuotes) {
-            result.push(current);
-            current = '';
-        } else {
-            current += char;
-        }
-    }
-    
-    result.push(current);
-    return result;
-}
-
-/**
- * Generate CSV from records
- */
-function generateCSVFromRecords(records) {
-    if (!records || records.length === 0) return '';
-    
-    const headers = [
-        'accountHolder',
-        'bank',
-        'amount',
-        'duration',
-        'durationUnit',
-        'rate',
-        'startDate',
-        'maturityDate',
-        'certificateStatus',
-        'notes'
-    ];
-    
-    let csv = '\uFEFF'; // UTF-8 BOM for Excel
-    csv += headers.join(',') + '\n';
-    
-    records.forEach(record => {
-        const maturityDate = record.maturityDate || calculateMaturityDate(
-            record.startDate, record.duration, record.durationUnit
-        );
-        
-        const row = [
-            csvEscape(record.accountHolder || ''),
-            csvEscape(record.bank || ''),
-            record.amount || 0,
-            record.duration || 0,
-            record.durationUnit || 'Months',
-            record.rate || 0,
-            record.startDate || '',
-            maturityDate || '',
-            csvEscape(record.certificateStatus || 'Not Obtained'),
-            csvEscape(record.notes || '')
-        ];
-        
-        csv += row.join(',') + '\n';
-    });
-    
-    return csv;
-}
-
 /**
  * Escape value for CSV
  */
@@ -1304,44 +1198,183 @@ async function backupData() {
 }
 
 /**
- * Export all FD records to CSV
+ * Create Excel backup of all data
  */
-async function exportAllToCSV() {
+async function backupDataToExcel() {
     try {
-        console.log('[FD Manager] Starting CSV export...');
-        
-        const records = (await getData('fd_records')) || [];
-        
-        if (!Array.isArray(records) || records.length === 0) {
-            showToast('⚠️ No records available to export', 'warning');
+        if (!pinHash) {
+            showToast('❌ Please log in first', 'danger');
             return;
         }
 
-        const csv = generateCSVFromRecords(records);
+        if (typeof XLSX === 'undefined') {
+            showToast('❌ Excel library not loaded. Please refresh the page.', 'error');
+            return;
+        }
 
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        
-        link.setAttribute('href', url);
-        link.setAttribute('download', `FD-Records-${new Date().toISOString().slice(0,10)}.csv`);
-        link.style.visibility = 'hidden';
-        
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-        URL.revokeObjectURL(url);
+        const records = (await getData('fd_records')) || [];
+        const accountHolders = (await getData('fd_account_holders')) || [];
+        const templates = (await getData('fd_templates')) || [];
+        const calculations = (await getData('fd_calculations')) || [];
+        const comparisons = (await getData('fd_comparisons')) || [];
 
-        showToast(`✅ Successfully exported ${records.length} records to CSV!`, 'success');
-        console.log(`[FD Manager] CSV export successful: ${records.length} records`);
-        
+        if (!Array.isArray(records) || records.length === 0) {
+            showToast('⚠️ No records to backup', 'warning');
+            return;
+        }
+
+        const workbook = XLSX.utils.book_new();
+
+        // Add metadata sheet
+        const metadata = [{
+            version: '4.0',
+            timestamp: new Date().toISOString(),
+            totalRecords: records.length,
+            totalAccountHolders: accountHolders.length,
+            totalTemplates: templates.length,
+            totalCalculations: calculations.length,
+            totalComparisons: comparisons.length
+        }];
+        const metadataSheet = XLSX.utils.json_to_sheet(metadata);
+        XLSX.utils.book_append_sheet(workbook, metadataSheet, 'Metadata');
+
+        // Add records sheet
+        const recordsSheet = XLSX.utils.json_to_sheet(records);
+        XLSX.utils.book_append_sheet(workbook, recordsSheet, 'FD_Records');
+
+        // Add account holders sheet
+        const holdersSheet = XLSX.utils.json_to_sheet(accountHolders);
+        XLSX.utils.book_append_sheet(workbook, holdersSheet, 'Account_Holders');
+
+        // Add templates sheet
+        const templatesSheet = XLSX.utils.json_to_sheet(templates);
+        XLSX.utils.book_append_sheet(workbook, templatesSheet, 'Templates');
+
+        // Add calculations sheet
+        const calculationsSheet = XLSX.utils.json_to_sheet(calculations);
+        XLSX.utils.book_append_sheet(workbook, calculationsSheet, 'Calculations');
+
+        // Add comparisons sheet
+        const comparisonsSheet = XLSX.utils.json_to_sheet(comparisons);
+        XLSX.utils.book_append_sheet(workbook, comparisonsSheet, 'Comparisons');
+
+        // Generate filename with timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const filename = `FD-Manager-Backup-${timestamp}.xlsx`;
+
+        XLSX.writeFile(workbook, filename);
+
+        showToast(`✅ Excel backup created successfully! (${records.length} records)`, 'success');
+        console.log(`[FD Manager] Excel backup created: ${filename}`);
+
     } catch (error) {
-        console.error('[FD Manager] CSV export error:', error);
-        showToast('❌ Export failed: ' + error.message, 'danger');
+        console.error('[FD Manager] Excel backup error:', error);
+        showToast('❌ Error creating Excel backup: ' + error.message, 'danger');
     }
 }
 
+/**
+ * Restore data from Excel backup file
+ */
+async function restoreDataFromExcel(file) {
+    try {
+        if (!pinHash) {
+            showToast('❌ Please log in first', 'danger');
+            return;
+        }
+
+        if (typeof XLSX === 'undefined') {
+            showToast('❌ Excel library not loaded. Please refresh the page.', 'error');
+            return;
+        }
+
+        const reader = new FileReader();
+
+        reader.onload = async function(e) {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+
+                // Check if required sheets exist
+                const requiredSheets = ['FD_Records', 'Account_Holders', 'Templates'];
+                const sheetNames = workbook.SheetNames;
+
+                if (!requiredSheets.every(sheet => sheetNames.includes(sheet))) {
+                    throw new Error('Invalid Excel backup file format. Missing required sheets.');
+                }
+
+                // Read data from sheets
+                const records = XLSX.utils.sheet_to_json(workbook.Sheets['FD_Records']) || [];
+                const accountHolders = XLSX.utils.sheet_to_json(workbook.Sheets['Account_Holders']) || [];
+                const templates = XLSX.utils.sheet_to_json(workbook.Sheets['Templates']) || [];
+                const calculations = XLSX.utils.sheet_to_json(workbook.Sheets['Calculations']) || [];
+                const comparisons = XLSX.utils.sheet_to_json(workbook.Sheets['Comparisons']) || [];
+
+                // Validate records
+                if (!Array.isArray(records)) {
+                    throw new Error('Invalid records data in Excel file');
+                }
+
+                // Prepare backup data for smart restore
+                const backupData = {
+                    version: '4.0',
+                    records: records,
+                    accountHolders: accountHolders,
+                    templates: templates,
+                    calculations: calculations,
+                    comparisons: comparisons
+                };
+
+                // Get existing records for analysis
+                const existingRecordsRaw = await getData('fd_records');
+                const existingRecords = Array.isArray(existingRecordsRaw) ? existingRecordsRaw : [];
+
+                // Analyze import data
+                const analysis = analyzeImportData(backupData.records, existingRecords);
+
+                // Show preview dialog
+                showImportPreview(analysis, async function(selectedOption, analysisData) {
+                    await processSmartRestore(selectedOption, analysisData, backupData, null);
+                });
+
+            } catch (error) {
+                console.error('Excel restore error:', error);
+                showToast('❌ Error reading Excel file: ' + error.message, 'error');
+            }
+        };
+
+        reader.readAsArrayBuffer(file);
+
+    } catch (error) {
+        console.error('[FD Manager] Excel restore error:', error);
+        showToast('❌ Error restoring from Excel: ' + error.message, 'danger');
+    }
+}
+
+/**
+ * Handle Excel restore file selection
+ */
+function handleExcelRestore() {
+    const fileInput = document.getElementById('excelRestoreFile');
+    const file = fileInput.files[0];
+
+    if (!file) {
+        showToast('Please select an Excel backup file', 'warning');
+        return;
+    }
+
+    if (!file.name.toLowerCase().endsWith('.xlsx') && !file.name.toLowerCase().endsWith('.xls')) {
+        showToast('Please select a valid Excel file (.xlsx or .xls)', 'error');
+        fileInput.value = '';
+        return;
+    }
+
+    restoreDataFromExcel(file);
+}
+
+/**
+ * Export all FD records to CSV
+ */
 // ===================================
 // Initialize
 // ===================================

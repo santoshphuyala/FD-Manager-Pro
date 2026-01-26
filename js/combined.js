@@ -1144,7 +1144,7 @@ async function checkExpiringFDs() {
 console.log('[FD Manager Nepal] App.js Part 1 loaded successfully');
 // ===================================
 // FD Manager Pro - Application Part 2
-// OCR, Templates, CSV Import, Dashboard
+// OCR, Templates, Dashboard
 // Nepal Edition - Version 4.0
 // ===================================
 
@@ -1431,92 +1431,6 @@ async function deleteTemplate(templateId) {
 }
 
 // ===================================
-// CSV Import Functions
-// ===================================
-
-function importCSV() {
-    const accountHolder = document.getElementById('fdAccountHolder').value;
-    
-    if (!accountHolder) {
-        showToast('Please select an account holder first', 'warning');
-        return;
-    }
-    
-    document.getElementById('csvFileInput').click();
-}
-
-function handleCSVImport() {
-    const fileInput = document.getElementById('csvFileInput');
-    const file = fileInput.files[0];
-    
-    if (!file) return;
-    
-    const reader = new FileReader();
-    
-    reader.onload = async function(e) {
-        try {
-            const csvText = e.target.result;
-            const csvRecords = parseCSV(csvText);
-            
-            if (csvRecords.length === 0) {
-                showToast('CSV file is empty or invalid', 'error');
-                return;
-            }
-            
-            const accountHolder = document.getElementById('fdAccountHolder').value;
-            let records = (await getData('fd_records')) || [];
-            
-            let importedCount = 0;
-            
-            csvRecords.forEach(csvRecord => {
-                const fdRecord = {
-                    id: generateId(),
-                    accountHolder: accountHolder,
-                    bank: csvRecord.bank || csvRecord.bankname || '',
-                    amount: parseFloat(csvRecord.amount) || 0,
-                    duration: parseInt(csvRecord.duration) || 0,
-                    durationUnit: csvRecord.unit || 'Months',
-                    rate: parseFloat(csvRecord.rate || csvRecord.interestrate) || 0,
-                    startDate: csvRecord.startdate || '',
-                    maturityDate: '',
-                    certificateStatus: csvRecord.certificatestatus || 'Not Obtained',
-                    notes: csvRecord.notes || '',
-                    createdAt: new Date().toISOString()
-                };
-                
-                if (fdRecord.startDate && fdRecord.duration) {
-                    fdRecord.maturityDate = calculateMaturityDate(
-                        fdRecord.startDate,
-                        fdRecord.duration,
-                        fdRecord.durationUnit
-                    );
-                }
-                
-                if (fdRecord.bank && fdRecord.amount && fdRecord.rate && fdRecord.startDate) {
-                    records.push(fdRecord);
-                    importedCount++;
-                }
-            });
-            
-            saveData('fd_records', records);
-            
-            loadFDRecords();
-            updateDashboard();
-            updateAnalytics();
-            
-            showToast(`Successfully imported ${importedCount} record(s)`, 'success');
-            
-            fileInput.value = '';
-            
-        } catch (error) {
-            console.error('CSV import error:', error);
-            showToast('Error importing CSV. Please check file format.', 'error');
-        }
-    };
-    
-    reader.readAsText(file);
-}
-
 // ===================================
 // Dashboard Functions
 // ===================================
@@ -4046,180 +3960,6 @@ function generateInvalidSection(invalid) {
 /**
  * Handle CSV import with duplicate detection and preview
  */
-function handleBulkCSVImportSmart() {
-    const fileInput = document.getElementById('bulkCSVImportFile');
-    const file = fileInput.files[0];
-    
-    if (!file) {
-        showToast('Please select a CSV file', 'warning');
-        return;
-    }
-    
-    const reader = new FileReader();
-    
-    reader.onload = function(e) {
-        try {
-            const csvText = e.target.result;
-            const csvRecords = parseCSV(csvText);
-            
-            if (csvRecords.length === 0) {
-                showToast('CSV file is empty or invalid', 'error');
-                fileInput.value = '';
-                return;
-            }
-            
-            // Get existing records
-            const existingRecords = getData('fd_records') || [];
-            
-            // Prepare import records
-            const importRecords = csvRecords.map(csvRecord => {
-                const holderName = (csvRecord.accountholder || '').trim();
-                
-                return {
-                    accountHolder: holderName,
-                    bank: (csvRecord.bank || '').trim(),
-                    amount: parseFloat(csvRecord.amount) || 0,
-                    duration: parseInt(csvRecord.duration) || 12,
-                    durationUnit: csvRecord.unit || 'Months',
-                    rate: parseFloat(csvRecord.rate) || 0,
-                    startDate: csvRecord.startdate || '',
-                    maturityDate: csvRecord.maturitydate || '',
-                    certificateStatus: csvRecord.certificatestatus || 'Not Obtained',
-                    notes: csvRecord.notes || ''
-                };
-            });
-            
-            // Analyze import data
-            const analysis = analyzeImportData(importRecords, existingRecords);
-            
-            // Show preview dialog
-            showImportPreview(analysis, function(selectedOption, analysisData) {
-                processSmartImport(selectedOption, analysisData, fileInput);
-            });
-            
-        } catch (error) {
-            console.error('CSV import error:', error);
-            showToast('Error reading CSV file. Please check file format.', 'error');
-            fileInput.value = '';
-        }
-    };
-    
-    reader.readAsText(file);
-}
-
-/**
- * Process import based on user selection
- */
-function processSmartImport(option, analysis, fileInput) {
-    try {
-        let records = getData('fd_records') || [];
-        let holders = getData('fd_account_holders') || [];
-        
-        const beforeCount = records.length;
-        let addedCount = 0;
-        let updatedCount = 0;
-        
-        // Process based on selected option
-        if (option === 'new') {
-            // Import only new records
-            analysis.newRecords.forEach(item => {
-                const record = prepareRecordForImport(item.record);
-                
-                // Add holder if not exists
-                if (!holders.includes(record.accountHolder)) {
-                    holders.push(record.accountHolder);
-                }
-                
-                records.push(record);
-                addedCount++;
-            });
-            
-        } else if (option === 'newAndUpdate') {
-            // Import new + update existing
-            analysis.newRecords.forEach(item => {
-                const record = prepareRecordForImport(item.record);
-                
-                if (!holders.includes(record.accountHolder)) {
-                    holders.push(record.accountHolder);
-                }
-                
-                records.push(record);
-                addedCount++;
-            });
-            
-            analysis.updated.forEach(item => {
-                const existingIndex = records.findIndex(r => r.id === item.existing.id);
-                if (existingIndex !== -1) {
-                    // Update existing record
-                    records[existingIndex] = {
-                        ...records[existingIndex],
-                        rate: item.imported.rate,
-                        duration: item.imported.duration,
-                        durationUnit: item.imported.durationUnit,
-                        maturityDate: item.imported.maturityDate || calculateMaturityDate(
-                            item.imported.startDate,
-                            item.imported.duration,
-                            item.imported.durationUnit
-                        ),
-                        certificateStatus: item.imported.certificateStatus,
-                        notes: item.imported.notes,
-                        updatedAt: new Date().toISOString()
-                    };
-                    updatedCount++;
-                }
-            });
-            
-        } else if (option === 'all') {
-            // Import everything including duplicates
-            [...analysis.newRecords, ...analysis.duplicates, ...analysis.updated].forEach(item => {
-                const record = prepareRecordForImport(item.record || item.imported);
-                
-                if (!holders.includes(record.accountHolder)) {
-                    holders.push(record.accountHolder);
-                }
-                
-                records.push(record);
-                addedCount++;
-            });
-        }
-        
-        // Save data
-        saveData('fd_account_holders', holders);
-        saveData('fd_records', records);
-        
-        // Refresh UI
-        loadAccountHolders();
-        loadFDRecords();
-        updateDashboard();
-        updateAnalytics();
-        loadCertificates();
-        
-        // Show success message
-        let message = '✅ Import completed successfully!\n\n';
-        message += `📊 Before: ${beforeCount} records\n`;
-        message += `📊 After: ${records.length} records\n`;
-        message += `➕ Added: ${addedCount} records\n`;
-        if (updatedCount > 0) {
-            message += `🔄 Updated: ${updatedCount} records\n`;
-        }
-        if (analysis.duplicates.length > 0 && option === 'new') {
-            message += `⏭️ Skipped: ${analysis.duplicates.length} duplicates\n`;
-        }
-        if (analysis.invalid.length > 0) {
-            message += `❌ Invalid: ${analysis.invalid.length} records\n`;
-        }
-        
-        alert(message);
-        showToast(`Import completed: ${addedCount} added, ${updatedCount} updated`, 'success');
-        
-        fileInput.value = '';
-        
-    } catch (error) {
-        console.error('Import processing error:', error);
-        showToast('Error processing import. Please try again.', 'error');
-    }
-}
-
 /**
  * Prepare record for import with all necessary fields
  */
@@ -4391,7 +4131,9 @@ async function processSmartRestore(option, analysis, backupData, fileInput) {
         alert(message);
         showToast('Restore completed. Reloading...', 'success');
         
-        fileInput.value = '';
+        if (fileInput) {
+            fileInput.value = '';
+        }
         
         setTimeout(() => {
             location.reload();
@@ -4404,7 +4146,7 @@ async function processSmartRestore(option, analysis, backupData, fileInput) {
 }
 
 // Keep existing export functions unchanged
-// ... (exportAllPDF, exportToExcel, exportAllToCSV, backupData, clearAllData, etc
+// ... (exportAllPDF, exportToExcel, backupData, clearAllData, etc
 
 function clearAllData() {
     const confirmation = prompt('⚠️ WARNING: This will delete ALL FD data!\n\nType "DELETE" to confirm:');
