@@ -21,6 +21,13 @@ export async function initializeApp() {
             loadCertificates();
         }
 
+    } catch (error) {
+        console.error('Error initializing app:', error);
+        showToast('Error initializing application', 'error');
+    } finally {
+        hideLoading();
+    }
+}
 
 export async function initializeEventListeners() {
     // Login form

@@ -174,6 +174,9 @@ async function initializeApp() {
         if (typeof updateAnalytics === 'function') await updateAnalytics();
         populateSettings();
         
+        // Initialize calculator account holders
+        await loadAccountHoldersForCalc();
+        
         // Load certificates if function exists
         if (typeof loadCertificates === 'function') {
             await loadCertificates();
@@ -258,7 +261,13 @@ function setupFormAutoSave() {
 // ===================================
 
 async function loadAccountHolders() {
-    const holders = (await getData('fd_account_holders')) || [];
+    let holders = (await getData('fd_account_holders')) || [];
+    
+    // Clean up invalid entries first
+    holders = cleanupAccountHolders(holders);
+    
+    // Save cleaned data back to storage
+    await saveData('fd_account_holders', holders);
     
     const dropdowns = [
         'fdAccountHolder',
@@ -274,21 +283,83 @@ async function loadAccountHolders() {
                 '<option value="">All Account Holders</option>' :
                 '<option value="">Select Account Holder</option>';
             
-            holders.forEach(holder => {
+            // Filter enabled account holders and handle both string/object formats
+            const enabledHolders = holders.filter(holder => {
+                if (typeof holder === 'object') {
+                    return holder.enabled !== false;
+                }
+                return true; // Default to enabled for old string format
+            });
+            
+            enabledHolders.forEach(holder => {
+                const holderName = typeof holder === 'object' ? holder.name : holder;
+                // Skip invalid entries
+                if (!holderName || holderName === '[object Object]' || typeof holderName !== 'string') {
+                    return;
+                }
                 const option = document.createElement('option');
-                option.value = holder;
-                option.textContent = holder;
+                option.value = holderName;
+                option.textContent = holderName;
                 select.appendChild(option);
             });
             
-            // Restore previous selection if valid
-            if (currentValue && holders.includes(currentValue)) {
+            // Restore previous selection if valid and enabled
+            const isValidSelection = currentValue && enabledHolders.some(h => {
+                const holderName = typeof h === 'object' ? h.name : h;
+                return holderName === currentValue;
+            });
+            if (isValidSelection) {
                 select.value = currentValue;
             }
         }
     });
     
     updateAccountHoldersList(holders);
+}
+
+/**
+ * Clean up invalid account holder entries
+ * @param {Array} holders - Array of account holders
+ * @returns {Array} - Cleaned array
+ */
+function cleanupAccountHolders(holders) {
+    if (!Array.isArray(holders)) return [];
+    
+    return holders.filter(holder => {
+        if (typeof holder === 'object') {
+            // Check if object has a valid name
+            return holder.name && 
+                   holder.name !== '[object Object]' && 
+                   typeof holder.name === 'string' &&
+                   holder.name.trim() !== '';
+        } else if (typeof holder === 'string') {
+            // Check if string is valid
+            return holder !== '[object Object]' && 
+                   holder.trim() !== '';
+        }
+        return false;
+    });
+}
+
+/**
+ * Manual cleanup function to fix corrupted account holder data
+ */
+async function cleanupAccountHolderData() {
+    try {
+        const holders = (await getData('fd_account_holders')) || [];
+        const cleanedHolders = cleanupAccountHolders(holders);
+        
+        if (cleanedHolders.length !== holders.length) {
+            await saveData('fd_account_holders', cleanedHolders);
+            loadAccountHolders();
+            showToast(`Cleaned up ${holders.length - cleanedHolders.length} invalid account holder entries`, 'success');
+        } else {
+            showToast('No invalid account holder entries found', 'info');
+        }
+    } catch (error) {
+        console.error('Cleanup error:', error);
+        showToast('Error cleaning up account holder data', 'error');
+    }
 }
 
 function updateAccountHoldersList(holders) {
@@ -303,21 +374,81 @@ function updateAccountHoldersList(holders) {
     // Clear container and build safely
     container.innerHTML = '';
     
-    holders.forEach(holder => {
+    holders.forEach((holder, index) => {
+        // Handle both string and object formats
+        let holderName, isEnabled;
+        
+        if (typeof holder === 'object') {
+            holderName = holder.name || holder.toString();
+            isEnabled = holder.enabled !== false;
+        } else {
+            holderName = holder;
+            isEnabled = true;
+        }
+        
+        // Skip invalid entries
+        if (!holderName || holderName === '[object Object]' || typeof holderName !== 'string') {
+            console.warn('Invalid account holder entry:', holder);
+            return;
+        }
+        
         const div = document.createElement('div');
         div.className = 'account-holder-item';
+        div.style.display = 'flex';
+        div.style.alignItems = 'center';
+        div.style.justifyContent = 'space-between';
+        div.style.padding = '8px';
+        div.style.border = '1px solid #dee2e6';
+        div.style.borderRadius = '4px';
+        div.style.marginBottom = '8px';
         
+        // Left section: Name and status
+        const leftSection = document.createElement('div');
+        leftSection.style.display = 'flex';
+        leftSection.style.alignItems = 'center';
+        leftSection.style.gap = '10px';
+        
+        // Status indicator
+        const statusIndicator = document.createElement('div');
+        statusIndicator.style.width = '8px';
+        statusIndicator.style.height = '8px';
+        statusIndicator.style.borderRadius = '50%';
+        statusIndicator.style.backgroundColor = isEnabled ? '#28a745' : '#dc3545';
+        statusIndicator.title = isEnabled ? 'Enabled' : 'Disabled';
+        
+        // Name span
         const span = document.createElement('span');
-        span.innerHTML = '<i class="bi bi-person-fill"></i> ';
-        span.appendChild(document.createTextNode(holder));
+        span.style.color = isEnabled ? '#000' : '#6c757d';
+        span.style.textDecoration = isEnabled ? 'none' : 'line-through';
+        span.innerHTML = `<i class="bi bi-person-fill"></i> ${holderName}`;
         
-        const btn = document.createElement('button');
-        btn.className = 'btn btn-sm btn-outline-danger';
-        btn.innerHTML = '<i class="bi bi-trash"></i>';
-        btn.onclick = () => deleteAccountHolder(holder);
+        leftSection.appendChild(statusIndicator);
+        leftSection.appendChild(span);
         
-        div.appendChild(span);
-        div.appendChild(btn);
+        // Right section: Buttons
+        const rightSection = document.createElement('div');
+        rightSection.style.display = 'flex';
+        rightSection.style.gap = '5px';
+        
+        // Toggle enable/disable button
+        const toggleBtn = document.createElement('button');
+        toggleBtn.className = `btn btn-sm ${isEnabled ? 'btn-outline-warning' : 'btn-outline-success'}`;
+        toggleBtn.innerHTML = isEnabled ? '<i class="bi bi-pause"></i>' : '<i class="bi bi-play"></i>';
+        toggleBtn.title = isEnabled ? 'Disable Account Holder' : 'Enable Account Holder';
+        toggleBtn.onclick = () => toggleAccountHolder(holderName, !isEnabled);
+        
+        // Delete button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn btn-sm btn-outline-danger';
+        deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
+        deleteBtn.title = 'Delete Account Holder';
+        deleteBtn.onclick = () => deleteAccountHolder(holderName);
+        
+        rightSection.appendChild(toggleBtn);
+        rightSection.appendChild(deleteBtn);
+        
+        div.appendChild(leftSection);
+        div.appendChild(rightSection);
         container.appendChild(div);
     });
 }
@@ -333,30 +464,53 @@ async function addAccountHolder(event) {
         return;
     }
     
-    const holders = (await getData('fd_account_holders')) || [];
+    let holders = (await getData('fd_account_holders')) || [];
+    
+    // Convert old string format to object format if needed
+    if (holders.length > 0 && typeof holders[0] === 'string') {
+        holders = holders.map(h => ({ name: h, enabled: true }));
+    }
     
     // Case-insensitive duplicate check
-    if (holders.some(h => h.toLowerCase() === name.toLowerCase())) {
+    if (holders.some(h => h.name.toLowerCase() === name.toLowerCase())) {
         showToast('Account holder already exists', 'error');
         return;
     }
     
-    holders.push(name);
+    // Add as object with enabled status
+    holders.push({ name: name, enabled: true });
     await saveData('fd_account_holders', holders);
     
     loadAccountHolders();
+    await loadAccountHoldersForCalc(); // Refresh calculator dropdown
     if (input) input.value = '';
     
     showToast(`Account holder "${name}" added successfully`, 'success');
 }
 
 async function deleteAccountHolder(name) {
+    // Validate input
+    if (!name || name === '[object Object]' || typeof name !== 'string') {
+        showToast('Invalid account holder name', 'error');
+        return;
+    }
+    
     if (!confirm(`Delete account holder "${name}"?\n\nThis will also delete all associated FD records.`)) {
         return;
     }
     
     let holders = (await getData('fd_account_holders')) || [];
-    holders = holders.filter(h => h !== name);
+    
+    // Clean up holders first
+    holders = cleanupAccountHolders(holders);
+    
+    // Handle both string and object formats
+    if (holders.length > 0 && typeof holders[0] === 'object') {
+        holders = holders.filter(h => h.name !== name);
+    } else {
+        holders = holders.filter(h => h !== name);
+    }
+    
     await saveData('fd_account_holders', holders);
     
     let records = (await getData('fd_records')) || [];
@@ -365,10 +519,81 @@ async function deleteAccountHolder(name) {
     await saveData('fd_records', records);
     
     loadAccountHolders();
+    await loadAccountHoldersForCalc(); // Refresh calculator dropdown
     loadFDRecords();
     updateDashboard();
     
     showToast(`Account holder "${name}" deleted (${deletedCount} records removed)`, 'success');
+}
+
+async function toggleAccountHolder(name, enabled) {
+    let holders = (await getData('fd_account_holders')) || [];
+    
+    // Handle both string and object formats
+    if (holders.length > 0 && typeof holders[0] === 'object') {
+        const holder = holders.find(h => h.name === name);
+        if (holder) {
+            holder.enabled = enabled;
+        }
+    } else {
+        // Convert to object format
+        holders = holders.map(h => {
+            if (h === name) {
+                return { name: h, enabled: enabled };
+            }
+            return { name: h, enabled: true };
+        });
+    }
+    
+    await saveData('fd_account_holders', holders);
+    
+    // Refresh all UI components to reflect the change
+    loadAccountHolders();
+    await loadAccountHoldersForCalc(); // Refresh calculator dropdown
+    loadFDRecords();
+    await updateDashboard();
+    if (typeof updateAnalytics === 'function') await updateAnalytics();
+    
+    showToast(`Account holder "${name}" ${enabled ? 'enabled' : 'disabled'}`, 'success');
+}
+
+// ===================================
+// Helper Functions for Account Holder Status
+// ===================================
+
+/**
+ * Get enabled account holders only
+ * @returns {Array} - Array of enabled account holder names
+ */
+async function getEnabledAccountHolders() {
+    const holders = (await getData('fd_account_holders')) || [];
+    return holders
+        .filter(holder => {
+            if (typeof holder === 'object') {
+                return holder.enabled !== false;
+            }
+            return true; // Default to enabled for old string format
+        })
+        .map(holder => typeof holder === 'object' ? holder.name : holder);
+}
+
+/**
+ * Check if an account holder is enabled
+ * @param {string} holderName - Name of the account holder
+ * @returns {boolean} - True if enabled, false if disabled
+ */
+async function isAccountHolderEnabled(holderName) {
+    const holders = (await getData('fd_account_holders')) || [];
+    const holder = holders.find(h => {
+        const name = typeof h === 'object' ? h.name : h;
+        return name === holderName;
+    });
+    
+    if (!holder) return true; // Default to enabled if not found
+    if (typeof holder === 'object') {
+        return holder.enabled !== false;
+    }
+    return true; // Default to enabled for old string format
 }
 
 // ===================================
@@ -378,13 +603,34 @@ async function deleteAccountHolder(name) {
 async function loadFDRecords() {
     const records = (await getData('fd_records')) || [];
     
+    // Filter out records for disabled account holders
+    const enabledRecords = await filterRecordsByAccountHolderStatus(records);
+    
     // Update the page size selector to reflect current setting
     const selector = document.getElementById('recordsPerPageSelect');
     if (selector) {
         selector.value = recordsPerPage;
     }
     
-    displayFDRecords(records, 1);
+    displayFDRecords(enabledRecords, 1);
+}
+
+/**
+ * Filter FD records based on account holder enabled status
+ * @param {Array} records - Array of FD records
+ * @returns {Array} - Filtered array with only enabled account holder records
+ */
+async function filterRecordsByAccountHolderStatus(records) {
+    const enabledRecords = [];
+    
+    for (const record of records) {
+        const isEnabled = await isAccountHolderEnabled(record.accountHolder);
+        if (isEnabled) {
+            enabledRecords.push(record);
+        }
+    }
+    
+    return enabledRecords;
 }
 
 function displayFDRecords(records, page = 1) {
@@ -531,6 +777,9 @@ function applyRecordFilters(records) {
             }
         });
     }
+    
+    // Apply account holder enabled filter (async filtering handled in loadFDRecords)
+    // This ensures disabled account holders are never shown
     
     return records;
 }
@@ -1438,6 +1687,9 @@ async function deleteTemplate(templateId) {
 async function updateDashboard() {
     const selectedHolder = document.getElementById('dashboardHolderFilter')?.value;
     let records = (await getData('fd_records')) || [];
+    
+    // Filter out records for disabled account holders
+    records = await filterRecordsByAccountHolderStatus(records);
     
     if (selectedHolder) {
         records = records.filter(r => r.accountHolder === selectedHolder);
@@ -2430,7 +2682,10 @@ console.log('[FD Manager Nepal] App-part2.js loaded successfully');
 // ===================================
 
 async function updateAnalytics() {
-    const records = (await getData('fd_records')) || [];
+    let records = (await getData('fd_records')) || [];
+    
+    // Filter out records for disabled account holders
+    records = await filterRecordsByAccountHolderStatus(records);
     
     if (records.length === 0) {
         const canvas = document.getElementById('analyticsChart');
@@ -2575,16 +2830,33 @@ async function toggleCalcMode() {
  * Load account holders for calculator
  */
 async function loadAccountHoldersForCalc() {
-    const holders = (await getData('fd_account_holders')) || [];
+    let holders = (await getData('fd_account_holders')) || [];
+    
+    // Clean up invalid entries first
+    holders = cleanupAccountHolders(holders);
+    
+    // Filter enabled account holders only
+    const enabledHolders = holders.filter(holder => {
+        if (typeof holder === 'object') {
+            return holder.enabled !== false;
+        }
+        return true; // Default to enabled for old string format
+    });
+    
     const select = document.getElementById('calcAccountHolder');
     
     if (!select) return;
     
     select.innerHTML = '<option value="">Select Holder</option>';
-    holders.forEach(holder => {
+    enabledHolders.forEach(holder => {
+        const holderName = typeof holder === 'object' ? holder.name : holder;
+        // Skip invalid entries
+        if (!holderName || holderName === '[object Object]' || typeof holderName !== 'string') {
+            return;
+        }
         const option = document.createElement('option');
-        option.value = holder;
-        option.textContent = holder;
+        option.value = holderName;
+        option.textContent = holderName;
         select.appendChild(option);
     });
 }
@@ -2602,6 +2874,11 @@ async function loadFDsForCalc() {
     }
     
     let records = (await getData('fd_records')) || [];
+    
+    // Filter out records for disabled account holders
+    records = await filterRecordsByAccountHolderStatus(records);
+    
+    // Filter by selected holder
     records = records.filter(r => r.accountHolder === holder);
     
     select.innerHTML = '<option value="">Select FD</option>';
@@ -3303,7 +3580,11 @@ document.addEventListener('DOMContentLoaded', function() {
 // ===================================
 
 async function loadCertificates() {
-    const records = (await getData('fd_records')) || [];
+    let records = (await getData('fd_records')) || [];
+    
+    // Filter out records for disabled account holders
+    records = await filterRecordsByAccountHolderStatus(records);
+    
     const recordsWithCerts = records.filter(r => r.certificate);
     
     const container = document.getElementById('certificatesGallery');
@@ -3341,8 +3622,11 @@ async function loadCertificates() {
 // Export Functions
 // ===================================
 
-function exportAllPDF() {
-    const records = getData('fd_records') || [];
+async function exportAllPDF() {
+    let records = (await getData('fd_records')) || [];
+    
+    // Filter out records for disabled account holders
+    records = await filterRecordsByAccountHolderStatus(records);
     
     if (records.length === 0) {
         showToast('No records to export', 'warning');
@@ -3404,8 +3688,11 @@ function exportAllPDF() {
     }
 }
 
-function exportToExcel() {
-    const records = getData('fd_records') || [];
+async function exportToExcel() {
+    let records = (await getData('fd_records')) || [];
+    
+    // Filter out records for disabled account holders
+    records = await filterRecordsByAccountHolderStatus(records);
     
     if (records.length === 0) {
         showToast('No records to export', 'warning');
