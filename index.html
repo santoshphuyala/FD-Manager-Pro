@@ -142,6 +142,34 @@
                     <i class="bi bi-file-earmark-pdf"></i> Certificates
                 </button>
             </li>
+            <li class="nav-item dropdown" role="presentation">
+                <button class="nav-link dropdown-toggle" id="export-dropdown" 
+                        type="button" title="Export Data">
+                    <i class="bi bi-download"></i> Export
+                </button>
+                <ul class="dropdown-menu" aria-labelledby="export-dropdown">
+                    <li><a class="dropdown-item" href="#" onclick="backupData(); return false;">
+                        <i class="bi bi-file-earmark-code"></i> Download JSON Backup
+                    </a></li>
+                    <li><a class="dropdown-item" href="#" onclick="backupDataToExcel(); return false;">
+                        <i class="bi bi-file-earmark-excel"></i> Download Excel Backup
+                    </a></li>
+                </ul>
+            </li>
+            <li class="nav-item dropdown" role="presentation">
+                <button class="nav-link dropdown-toggle" id="import-dropdown" 
+                        type="button" title="Import Data">
+                    <i class="bi bi-upload"></i> Import
+                </button>
+                <ul class="dropdown-menu" aria-labelledby="import-dropdown">
+                    <li><a class="dropdown-item" href="#" onclick="triggerJSONImport(); return false;">
+                        <i class="bi bi-file-earmark-code"></i> Restore JSON Backup
+                    </a></li>
+                    <li><a class="dropdown-item" href="#" onclick="triggerExcelImport(); return false;">
+                        <i class="bi bi-file-earmark-excel"></i> Restore Excel Backup
+                    </a></li>
+                </ul>
+            </li>
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="settings-tab" data-bs-toggle="tab" 
                         data-bs-target="#settings" type="button">
