@@ -54,49 +54,6 @@ class DataManager {
         );
     }
 
-    async init() {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, this.version);
-
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => {
-                this.db = request.result;
-                resolve();
-            };
-
-            request.onupgradeneeded = (event) => {
-                const db = event.target.result;
-                // Create object stores
-                if (!db.objectStoreNames.contains('data')) {
-                    db.createObjectStore('data');
-                }
-            };
-        });
-    }
-
-    async setEncryptionKey(pin) {
-        const keyMaterial = await crypto.subtle.importKey(
-            'raw',
-            new TextEncoder().encode(pin),
-            'PBKDF2',
-            false,
-            ['deriveKey']
-        );
-
-        this.encryptionKey = await crypto.subtle.deriveKey(
-            {
-                name: 'PBKDF2',
-                salt: new TextEncoder().encode('fd-manager-salt'),
-                iterations: 100000,
-                hash: 'SHA-256'
-            },
-            keyMaterial,
-            { name: 'AES-GCM', length: 256 },
-            false,
-            ['encrypt', 'decrypt']
-        );
-    }
-
     async encrypt(data) {
         if (!this.encryptionKey) throw new Error('Encryption key not set');
 
@@ -217,8 +174,13 @@ async function getData(key) {
     } catch (error) {
         console.error('Get data error:', error);
         // Fallback to localStorage
-        const data = localStorage.getItem(key);
-        return data ? JSON.parse(data) : null;
+        try {
+            const data = localStorage.getItem(key);
+            return data ? JSON.parse(data) : null;
+        } catch (parseError) {
+            console.error('JSON parse error:', parseError);
+            return null;
+        }
     }
 }
 

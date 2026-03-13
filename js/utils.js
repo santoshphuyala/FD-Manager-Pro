@@ -460,15 +460,16 @@ function formatCurrency(amount) {
     }
     
     try {
-        // Use 'en-IN' locale for Indian/Nepali number format (lakhs, crores)
         const formatted = Number(amount).toLocaleString('en-IN', {
-            minimumFractionDigits: 0,
+            minimumFractionDigits: 2,
             maximumFractionDigits: 2
         });
         return currencySymbol + ' ' + formatted;
     } catch (error) {
         // Fallback formatting
-        return currencySymbol + ' ' + Number(amount).toFixed(2);
+        const num = Number(amount);
+        if (isNaN(num)) return currencySymbol + ' 0';
+        return currencySymbol + ' ' + num.toFixed(2);
     }
 }
 
@@ -486,7 +487,9 @@ function formatNumber(num) {
             maximumFractionDigits: 2
         });
     } catch (error) {
-        return Number(num).toFixed(2);
+        const parsedNum = Number(num);
+        if (isNaN(parsedNum)) return '0';
+        return parsedNum.toFixed(2);
     }
 }
 
@@ -1396,4 +1399,119 @@ function showLoading() {
 function hideLoading() {
     const overlay = document.getElementById('loadingOverlay');
     if (overlay) overlay.style.display = 'none';
+}
+
+// ===================================
+// Quick Import/Export Functions
+// ===================================
+
+/**
+ * Trigger JSON import file dialog
+ */
+function triggerJSONImport() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            // Use the existing restore function
+            const fileInput = document.getElementById('restoreFile');
+            if (fileInput) {
+                // Create a DataTransfer object to set the file
+                const dataTransfer = new DataTransfer();
+                dataTransfer.items.add(file);
+                fileInput.files = dataTransfer.files;
+                
+                // Trigger the existing restore function
+                restoreDataSmart();
+            } else {
+                // Fallback if settings file input doesn't exist
+                showToast('⚠️ Please go to Settings > Backup & Restore to import JSON files', 'warning');
+            }
+        }
+    };
+    input.click();
+}
+
+/**
+ * Trigger Excel import file dialog
+ */
+function triggerExcelImport() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xls';
+    input.onchange = function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            // Use the existing Excel restore function directly
+            restoreDataFromExcel(file);
+        }
+    };
+    input.click();
+}
+
+/**
+ * Show export options modal (legacy function - kept for compatibility)
+ */
+function showExportOptions() {
+    showToast('📤 Use the Export dropdown for quick download options', 'info');
+}
+
+/**
+ * Show import options modal (legacy function - kept for compatibility)
+ */
+function showImportOptions() {
+    showToast('📥 Use the Import dropdown for quick restore options', 'info');
+}
+
+// ===================================
+// Dropdown Visibility Fix
+// ===================================
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Fix dropdown positioning after page load
+    setTimeout(fixDropdownPositioning, 500);
+});
+
+function fixDropdownPositioning() {
+    const dropdownButtons = document.querySelectorAll('.nav-item.dropdown .dropdown-toggle');
+    
+    dropdownButtons.forEach(button => {
+        button.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Close any other open dropdowns
+            document.querySelectorAll('.nav-tabs .dropdown-menu.show').forEach(menu => {
+                if (menu !== this.nextElementSibling) {
+                    menu.classList.remove('show');
+                }
+            });
+            
+            const dropdownMenu = this.nextElementSibling;
+            const rect = this.getBoundingClientRect();
+            
+            // Position dropdown manually
+            dropdownMenu.style.position = 'fixed';
+            dropdownMenu.style.top = (rect.bottom + window.scrollY) + 'px';
+            dropdownMenu.style.left = (rect.left + window.scrollX) + 'px';
+            dropdownMenu.style.zIndex = '99999';
+            dropdownMenu.classList.toggle('show');
+            
+            // Close dropdown when clicking outside
+            if (dropdownMenu.classList.contains('show')) {
+                setTimeout(() => {
+                    document.addEventListener('click', closeDropdown);
+                }, 100);
+            }
+            
+            function closeDropdown(e) {
+                if (!dropdownMenu.contains(e.target) && e.target !== button) {
+                    dropdownMenu.classList.remove('show');
+                    document.removeEventListener('click', closeDropdown);
+                }
+            }
+        });
+    });
 }
