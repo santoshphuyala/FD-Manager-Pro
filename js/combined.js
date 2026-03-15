@@ -811,12 +811,170 @@ function setRecordFilter(filter, event) {
     loadFDRecords();
 }
 
+// ===================================
+// AI-Powered Natural Language Search
+// ===================================
+
+let searchTimeout;
+let currentSearchResults = [];
+
+async function performSmartSearch() {
+    const query = document.getElementById('searchRecords').value;
+    const searchHint = document.getElementById('searchHint');
+    
+    // Clear previous timeout
+    if (searchTimeout) clearTimeout(searchTimeout);
+    
+    if (!query || query.length < 2) {
+        // Reset to normal filtering
+        filterRecords();
+        searchHint.textContent = 'Try: "highest amount", "nibl bank", "maturing next week"';
+        return;
+    }
+    
+    // Check if it's a natural language query
+    const isNaturalLanguage = /^(show|find|search|list|get|what|which)/i.test(query) || 
+                              /(\b(next|this|last)\s+(week|month|year)|maturing|expiring|highest|lowest|top|first|amount|rate|bank|holder)/i.test(query);
+    
+    if (isNaturalLanguage && typeof aiFeatures !== 'undefined') {
+        searchTimeout = setTimeout(async () => {
+            try {
+                searchHint.textContent = '🤖 AI is searching...';
+                const results = await aiFeatures.naturalLanguageSearch(query);
+                displaySmartSearchResults(results);
+                searchHint.textContent = `Found ${results.totalCount} results • ${results.suggestions[0] || ''}`;
+            } catch (error) {
+                console.error('Smart search failed:', error);
+                // Fallback to traditional search
+                filterRecords();
+                searchHint.textContent = 'Using traditional search (AI unavailable)';
+            }
+        }, 500);
+    } else {
+        // Use traditional search
+        filterRecords();
+        searchHint.textContent = 'Traditional search • Try natural language for better results';
+    }
+}
+
+function displaySmartSearchResults(searchResults) {
+    currentSearchResults = searchResults.results;
+    
+    // Update the records table with search results
+    const tbody = document.getElementById('recordsTableBody');
+    if (!tbody) return;
+    
+    if (searchResults.results.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="11" class="text-center text-muted">
+                    <div class="py-3">
+                        <i class="bi bi-search" style="font-size: 2rem;"></i>
+                        <p class="mb-1">No results found for "${searchResults.query}"</p>
+                        <small>${searchResults.suggestions.join(' • ')}</small>
+                    </div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    // Display results using existing displayRecords function
+    displayRecords(searchResults.results);
+    
+    // Show search summary
+    const searchInfo = document.createElement('div');
+    searchInfo.className = 'alert alert-info alert-sm mb-3';
+    searchInfo.innerHTML = `
+        <strong>🤖 AI Search Results:</strong> 
+        Found ${searchResults.totalCount} FDs for "${searchResults.query}"
+        ${searchResults.parsed.sort ? ` • Sorted by ${searchResults.parsed.sort.field} ${searchResults.parsed.sort.order}` : ''}
+        <button class="btn-close float-end" onclick="this.parentElement.remove()"></button>
+    `;
+    
+    // Remove previous search info
+    const existingInfo = document.querySelector('.alert-info');
+    if (existingInfo) existingInfo.remove();
+    
+    // Insert search info before the table
+    const table = document.querySelector('#recordsTableBody').closest('.card');
+    if (table) {
+        table.insertBefore(searchInfo, table.querySelector('.table-responsive'));
+    }
+}
+
+function showSearchHelp() {
+    const helpModal = new bootstrap.Modal(document.getElementById('searchHelpModal'));
+    helpModal.show();
+}
+
+function tryExampleSearch() {
+    // Close the help modal
+    const helpModal = bootstrap.Modal.getInstance(document.getElementById('searchHelpModal'));
+    helpModal.hide();
+    
+    // Switch to records tab
+    switchTab('records');
+    
+    // Set example search and trigger it
+    const searchInput = document.getElementById('searchRecords');
+    searchInput.value = 'highest amount FDs';
+    performSmartSearch();
+    
+    showToast('Try this example search: "highest amount FDs"', 'info');
+}
+
+function clearSmartSearch() {
+    document.getElementById('searchRecords').value = '';
+    document.getElementById('searchHint').textContent = 'Try: "highest amount", "nibl bank", "maturing next week"';
+    currentSearchResults = [];
+    filterRecords(); // Reset to normal view
+    
+    // Remove search info
+    const existingInfo = document.querySelector('.alert-info');
+    if (existingInfo) existingInfo.remove();
+}
+
+// Enhanced filterRecords to work with smart search
 function filterRecords() {
-    loadFDRecords();
+    const query = document.getElementById('searchRecords').value.toLowerCase();
+    const filter = recordFilter || 'all';
+    
+    // If we have smart search results, use them
+    if (currentSearchResults.length > 0 && query.length > 2) {
+        displayRecords(currentSearchResults);
+        return;
+    }
+    
+    // Traditional filtering
+    let records = allRecords || [];
+    
+    // Apply status filter
+    if (filter !== 'all') {
+        records = records.filter(record => {
+            const daysRemaining = calculateDaysRemaining(record.maturityDate);
+            if (filter === 'active') return daysRemaining > 30;
+            if (filter === 'expiring') return daysRemaining > 0 && daysRemaining <= 30;
+            return true;
+        });
+    }
+    
+    // Apply search filter
+    if (query) {
+        records = records.filter(record => {
+            return record.accountHolder?.toLowerCase().includes(query) ||
+                   record.bank?.toLowerCase().includes(query) ||
+                   record.notes?.toLowerCase().includes(query) ||
+                   record.amount?.toString().includes(query) ||
+                   record.rate?.toString().includes(query);
+        });
+    }
+    
+    displayRecords(records);
 }
 
 /**
- * Save FD record (handles both add and edit)
+ * Save FD record (handles both add and edit) with AI validation
  */
 async function saveFD(event) {
     if (event) event.preventDefault();
@@ -833,7 +991,7 @@ async function saveFD(event) {
     const fdNumber = document.getElementById('fdNumber')?.value || '';
     const notes = document.getElementById('fdNotes')?.value || '';
     
-    // Validation
+    // Traditional validation first
     if (!isValidAccountHolder(accountHolder)) {
         showToast('Please select a valid account holder', 'error');
         return;
@@ -862,6 +1020,52 @@ async function saveFD(event) {
     if (!isValidDate(startDate)) {
         showToast('Please enter a valid start date', 'error');
         return;
+    }
+    
+    // AI-powered validation and insights
+    if (typeof aiFeatures !== 'undefined') {
+        try {
+            const formData = {
+                accountHolder, bank, amount, duration, durationUnit, rate, startDate,
+                maturityDate: calculateMaturityDate(startDate, duration, durationUnit)
+            };
+            
+            const aiValidation = await aiFeatures.validateFDInput(formData);
+            
+            // Show AI warnings and suggestions
+            if (aiValidation.warnings.length > 0) {
+                const warningMessage = aiValidation.warnings.join('\n• ');
+                const proceed = confirm(`⚠️ AI Validation Warnings:\n• ${warningMessage}\n\nProceed anyway?`);
+                if (!proceed) return;
+            }
+            
+            if (aiValidation.suggestions.length > 0) {
+                const suggestionMessage = aiValidation.suggestions.join('\n• ');
+                showSmartSuggestion(`💡 AI Suggestions:\n• ${suggestionMessage}`);
+            }
+            
+            // Learn from user patterns
+            aiFeatures.userPatterns.typicalAmounts = aiFeatures.userPatterns.typicalAmounts || [];
+            aiFeatures.userPatterns.typicalAmounts.push(amount);
+            if (aiFeatures.userPatterns.typicalAmounts.length > 10) {
+                aiFeatures.userPatterns.typicalAmounts = aiFeatures.userPatterns.typicalAmounts.slice(-10);
+            }
+            
+            // Update rate history for learning
+            if (!aiFeatures.userPatterns.rateHistory) aiFeatures.userPatterns.rateHistory = {};
+            if (!aiFeatures.userPatterns.rateHistory[bank]) aiFeatures.userPatterns.rateHistory[bank] = {};
+            if (!aiFeatures.userPatterns.rateHistory[bank][duration]) aiFeatures.userPatterns.rateHistory[bank][duration] = [];
+            
+            aiFeatures.userPatterns.rateHistory[bank][duration].push(rate);
+            if (aiFeatures.userPatterns.rateHistory[bank][duration].length > 5) {
+                aiFeatures.userPatterns.rateHistory[bank][duration] = aiFeatures.userPatterns.rateHistory[bank][duration].slice(-5);
+            }
+            
+            aiFeatures.saveUserPatterns();
+            
+        } catch (error) {
+            console.error('AI validation failed:', error);
+        }
     }
     
     const maturityDate = calculateMaturityDate(startDate, duration, durationUnit);
@@ -1760,33 +1964,536 @@ function hideLoading() {
 }
 
 // ===================================
-// Notifications for Expiring FDs
+// AI-Enhanced Notifications for Expiring FDs
 // ===================================
 
 async function checkExpiringFDs() {
-    if ('Notification' in window) {
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-            const records = (await getData('fd_records')) || [];
-            const expiringSoon = records.filter(record => {
-                const maturityDate = record.maturityDate || calculateMaturityDate(
-                    record.startDate, record.duration, record.durationUnit
-                );
-                const daysRemaining = calculateDaysRemaining(maturityDate);
-                return daysRemaining !== null && daysRemaining <= 30 && daysRemaining > 0;
-            });
-            
-            if (expiringSoon.length > 0) {
-                new Notification('FD Manager Pro', {
-                    body: `${expiringSoon.length} FD(s) expiring within 30 days`,
-                    icon: 'images/icon-192x192.png'
-                });
+    // Wait for DOM to be ready and AI features to be available
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(checkExpiringFDs, 1000);
+        });
+        return;
+    }
+    
+    // Wait a bit more for AI features to load
+    setTimeout(async () => {
+        // Always check for expiring FDs - critical for user awareness
+        const records = (await getData('fd_records')) || [];
+        const expiringSoon = records.filter(record => {
+            const maturityDate = record.maturityDate || calculateMaturityDate(
+                record.startDate, record.duration, record.durationUnit
+            );
+            const daysRemaining = calculateDaysRemaining(maturityDate);
+            return daysRemaining !== null && daysRemaining <= 30 && daysRemaining > 0;
+        });
+        
+        // Always show browser notifications for expiring FDs (critical alerts)
+        if (expiringSoon.length > 0 && 'Notification' in window) {
+            const permission = await Notification.requestPermission();
+            if (permission === 'granted') {
+                // Use AI for intelligent notifications
+                if (typeof aiFeatures !== 'undefined') {
+                    try {
+                        // Create smart notifications for each expiring FD
+                        for (const record of expiringSoon) {
+                            const maturityDate = record.maturityDate || calculateMaturityDate(
+                                record.startDate, record.duration, record.durationUnit
+                            );
+                            const daysRemaining = calculateDaysRemaining(maturityDate);
+                            
+                            const notification = await aiFeatures.createSmartNotification('maturity_reminder', {
+                                ...record,
+                                daysRemaining,
+                                maturityDate
+                            });
+                            
+                            // Always show browser notification for expiring FDs (critical)
+                            if (notification && notification.priority > 50) {
+                                const daysToMaturity = aiFeatures.calculateDaysToMaturity(maturityDate);
+                                const notificationBody = notification.message;
+                                
+                                new Notification('FD Manager Pro - Smart Alert', {
+                                    body: notificationBody,
+                                    icon: 'images/icon-192x192.png',
+                                    tag: `maturity_${record.id}`,
+                                    requireInteraction: daysToMaturity <= 3
+                                });
+                                
+                                // Show in-app notification (always helpful for expiring FDs)
+                                if (notification) {
+                                    showSmartNotification(notification);
+                                }
+                            }
+                        }
+                        
+                        // Show summary notification
+                        if (expiringSoon.length > 1) {
+                            const summaryNotification = await aiFeatures.createSmartNotification('portfolio_alert', {
+                                type: 'maturity_summary',
+                                count: expiringSoon.length,
+                                severity: expiringSoon.some(r => calculateDaysRemaining(r.maturityDate) <= 7) ? 'high' : 'medium'
+                            });
+                            
+                            new Notification('FD Manager Pro - Portfolio Summary', {
+                                body: summaryNotification.message,
+                                icon: 'images/icon-192x192.png'
+                            });
+                        }
+                        
+                    } catch (error) {
+                        console.error('AI notification failed, using fallback:', error);
+                        // Fallback to traditional notification
+                        new Notification('FD Manager Pro', {
+                            body: `${expiringSoon.length} FD(s) expiring within 30 days`,
+                            icon: 'images/icon-192x192.png'
+                        });
+                    }
+                } else {
+                    // Traditional notification fallback
+                    new Notification('FD Manager Pro', {
+                        body: `${expiringSoon.length} FD(s) expiring within 30 days`,
+                        icon: 'images/icon-192x192.png'
+                    });
+                }
             }
         }
+    }, 2000); // 2 second delay to ensure everything is loaded
+}
+
+// Show smart in-app notification
+function showSmartNotification(notification) {
+    // Wait for DOM to be ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            showSmartNotification(notification);
+        });
+        return;
+    }
+    
+    let notificationContainer = document.getElementById('smartNotificationContainer');
+    if (!notificationContainer) {
+        // Create container if it doesn't exist
+        notificationContainer = document.createElement('div');
+        notificationContainer.id = 'smartNotificationContainer';
+        notificationContainer.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            max-width: 400px;
+        `;
+        
+        // Safely append to body
+        if (document.body) {
+            document.body.appendChild(notificationContainer);
+        } else {
+            // If body is not ready, wait for it
+            document.addEventListener('DOMContentLoaded', () => {
+                document.body.appendChild(notificationContainer);
+                showNotificationElement(notificationContainer, notification);
+            });
+            return;
+        }
+    }
+    
+    showNotificationElement(notificationContainer, notification);
+}
+
+function showNotificationElement(container, notification) {
+    const notificationElement = document.createElement('div');
+    notificationElement.className = `alert alert-${notification.priority > 80 ? 'danger' : notification.priority > 60 ? 'warning' : 'info'} alert-dismissible fade show`;
+    notificationElement.style.cssText = `
+        margin-bottom: 10px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        border-left: 4px solid ${notification.priority > 80 ? '#dc3545' : notification.priority > 60 ? '#ffc107' : '#17a2b8'};
+    `;
+    
+    let actionsHtml = '';
+    if (notification.actions && notification.actions.length > 0) {
+        actionsHtml = '<div class="mt-2">' + 
+            notification.actions.map(action => 
+                `<button class="btn btn-sm ${action.primary ? 'btn-primary' : 'btn-outline-secondary'} me-1" onclick="handleNotificationAction('${action.action}', '${notification.id}')">${action.label}</button>`
+            ).join('') + '</div>';
+    }
+    
+    notificationElement.innerHTML = `
+        <div class="d-flex justify-content-between align-items-start">
+            <div>
+                <strong>🤖 Smart Alert</strong><br>
+                <small>${notification.message}</small>
+                ${actionsHtml}
+            </div>
+            <button type="button" class="btn-close" onclick="this.parentElement.parentElement.remove()"></button>
+        </div>
+    `;
+    
+    container.appendChild(notificationElement);
+    
+    // Auto-remove after 10 seconds
+    setTimeout(() => {
+        if (notificationElement.parentElement) {
+            notificationElement.remove();
+        }
+    }, 10000);
+}
+
+// Handle notification actions
+function handleNotificationAction(action, notificationId) {
+    switch (action) {
+        case 'view':
+            // Switch to records tab and filter the specific FD
+            switchTab('records');
+            break;
+        case 'renewal_reminder':
+            showToast('Renewal reminder set! We\'ll notify you 7 days before maturity.', 'success');
+            break;
+        case 'mark_collected':
+            showToast('Certificate marked as collected!', 'success');
+            break;
+        case 'snooze':
+            showToast('Notification snoozed for 24 hours', 'info');
+            break;
+        default:
+            console.log('Unknown action:', action);
+    }
+    
+    // Remove the notification
+    const notificationElement = document.querySelector(`[data-notification-id="${notificationId}"]`);
+    if (notificationElement) {
+        notificationElement.remove();
     }
 }
 
 console.log('[FD Manager Nepal] App.js Part 1 loaded successfully');
+
+// Check and display AI status
+function checkAIStatus() {
+    const aiStatusElement = document.getElementById('aiStatus');
+    if (aiStatusElement) {
+        if (typeof aiFeatures !== 'undefined') {
+            aiStatusElement.style.display = 'inline-block';
+            aiStatusElement.className = 'badge bg-success me-2';
+            aiStatusElement.innerHTML = '<i class="bi bi-robot"></i> AI Active';
+            
+            // Test AI features
+            setTimeout(() => {
+                try {
+                    aiFeatures.smartBankRecognition('test').then(result => {
+                        if (result) {
+                            aiStatusElement.innerHTML = '<i class="bi bi-robot"></i> AI Ready';
+                        }
+                    }).catch(() => {
+                        aiStatusElement.className = 'badge bg-warning me-2';
+                        aiStatusElement.innerHTML = '<i class="bi bi-robot"></i> AI Partial';
+                    });
+                } catch (error) {
+                    aiStatusElement.className = 'badge bg-warning me-2';
+                    aiStatusElement.innerHTML = '<i class="bi bi-robot"></i> AI Limited';
+                }
+            }, 1000);
+        } else {
+            aiStatusElement.style.display = 'inline-block';
+            aiStatusElement.className = 'badge bg-secondary me-2';
+            aiStatusElement.innerHTML = '<i class="bi bi-robot"></i> AI Off';
+        }
+    }
+}
+
+// Check AI status after page loads
+setTimeout(checkAIStatus, 2000);
+
+// ===================================
+// AI Analytics & Notifications Management
+// ===================================
+
+// AI Settings Management
+function saveAISettings() {
+    const settings = {
+        smartRecognition: document.getElementById('aiSmartRecognition').checked,
+        ratePrediction: document.getElementById('aiRatePrediction').checked,
+        formValidation: document.getElementById('aiFormValidation').checked,
+        smartNotifications: document.getElementById('aiSmartNotifications').checked,
+        notificationTiming: document.getElementById('notificationTiming').value,
+        browserNotifications: document.getElementById('browserNotifications').checked,
+        inAppNotifications: document.getElementById('inAppNotifications').checked
+    };
+    
+    // Save to localStorage
+    localStorage.setItem('fd_ai_settings', JSON.stringify(settings));
+    
+    // Update AI features if available
+    if (typeof aiFeatures !== 'undefined') {
+        aiFeatures.updateSettings(settings);
+    }
+    
+    showToast('AI settings saved successfully!', 'success');
+    refreshNotifications();
+}
+
+function loadAISettings() {
+    const stored = localStorage.getItem('fd_ai_settings');
+    if (stored) {
+        const settings = JSON.parse(stored);
+        
+        // Update UI
+        document.getElementById('aiSmartRecognition').checked = settings.smartRecognition !== false;
+        document.getElementById('aiRatePrediction').checked = settings.ratePrediction !== false;
+        document.getElementById('aiFormValidation').checked = settings.formValidation !== false;
+        document.getElementById('aiSmartNotifications').checked = settings.smartNotifications !== false;
+        document.getElementById('notificationTiming').value = settings.notificationTiming || 'standard';
+        document.getElementById('browserNotifications').checked = settings.browserNotifications !== false;
+        document.getElementById('inAppNotifications').checked = settings.inAppNotifications !== false;
+        
+        // Update AI features
+        if (typeof aiFeatures !== 'undefined') {
+            aiFeatures.updateSettings(settings);
+        }
+    }
+}
+
+// Notification History Management
+function refreshNotifications() {
+    const tbody = document.getElementById('notificationHistoryTable');
+    if (!tbody) return;
+    
+    // Get notification history from AI features or localStorage
+    let notifications = [];
+    if (typeof aiFeatures !== 'undefined') {
+        notifications = aiFeatures.notificationHistory || [];
+    } else {
+        const stored = localStorage.getItem('fd_notification_history');
+        notifications = stored ? JSON.parse(stored) : [];
+    }
+    
+    // Sort by timestamp (newest first)
+    notifications.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    
+    // Limit to last 20 notifications
+    notifications = notifications.slice(0, 20);
+    
+    if (notifications.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center text-muted">
+                    <div class="py-3">
+                        <i class="bi bi-bell-slash" style="font-size: 2rem;"></i>
+                        <p class="mb-1">No notifications yet</p>
+                        <small>AI notifications will appear here</small>
+                    </div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    tbody.innerHTML = notifications.map(notification => {
+        const time = new Date(notification.timestamp).toLocaleString();
+        const priorityClass = notification.priority > 80 ? 'danger' : notification.priority > 60 ? 'warning' : 'info';
+        const statusClass = notification.read ? 'secondary' : 'primary';
+        const statusText = notification.read ? 'Read' : 'New';
+        
+        return `
+            <tr class="${notification.read ? '' : 'table-active'}">
+                <td><small>${time}</small></td>
+                <td><span class="badge bg-secondary">${notification.type}</span></td>
+                <td>${notification.message}</td>
+                <td><span class="badge bg-${priorityClass}">${notification.priority}</span></td>
+                <td><span class="badge bg-${statusClass}">${statusText}</span></td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="viewNotificationDetails('${notification.id}')" title="View">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteNotification('${notification.id}')" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+    
+    // Update unread count
+    const unreadCount = notifications.filter(n => !n.read).length;
+    if (unreadCount > 0) {
+        showToast(`${unreadCount} unread notifications`, 'info');
+    }
+}
+
+function clearNotificationHistory() {
+    if (confirm('Are you sure you want to clear all notification history?')) {
+        if (typeof aiFeatures !== 'undefined') {
+            aiFeatures.notificationHistory = [];
+            aiFeatures.saveNotificationHistory();
+        } else {
+            localStorage.removeItem('fd_notification_history');
+        }
+        refreshNotifications();
+        showToast('Notification history cleared', 'success');
+    }
+}
+
+function viewNotificationDetails(notificationId) {
+    let notification = null;
+    
+    if (typeof aiFeatures !== 'undefined') {
+        notification = aiFeatures.notificationHistory.find(n => n.id === notificationId);
+    } else {
+        const stored = localStorage.getItem('fd_notification_history');
+        const notifications = stored ? JSON.parse(stored) : [];
+        notification = notifications.find(n => n.id === notificationId);
+    }
+    
+    if (notification) {
+        // Mark as read
+        notification.read = true;
+        if (typeof aiFeatures !== 'undefined') {
+            aiFeatures.saveNotificationHistory();
+        } else {
+            localStorage.setItem('fd_notification_history', JSON.stringify(
+                JSON.parse(localStorage.getItem('fd_notification_history') || '[]')
+                    .map(n => n.id === notificationId ? notification : n)
+            ));
+        }
+        
+        // Show details modal
+        alert(`Notification Details:\n\nType: ${notification.type}\nMessage: ${notification.message}\nPriority: ${notification.priority}\nTime: ${new Date(notification.timestamp).toLocaleString()}`);
+        
+        refreshNotifications();
+    }
+}
+
+function deleteNotification(notificationId) {
+    if (confirm('Delete this notification?')) {
+        if (typeof aiFeatures !== 'undefined') {
+            aiFeatures.notificationHistory = aiFeatures.notificationHistory.filter(n => n.id !== notificationId);
+            aiFeatures.saveNotificationHistory();
+        } else {
+            const stored = localStorage.getItem('fd_notification_history');
+            const notifications = stored ? JSON.parse(stored) : [];
+            notifications.splice(notifications.findIndex(n => n.id === notificationId), 1);
+            localStorage.setItem('fd_notification_history', JSON.stringify(notifications));
+        }
+        refreshNotifications();
+        showToast('Notification deleted', 'success');
+    }
+}
+
+// AI Insights Generation
+async function generateAIInsights() {
+    const insightsDiv = document.getElementById('aiInsights');
+    if (!insightsDiv) return;
+    
+    try {
+        const records = (await getData('fd_records')) || [];
+        
+        if (records.length === 0) {
+            insightsDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="bi bi-info-circle"></i> 
+                    No FD records found. Add some FDs to get AI insights.
+                </div>
+            `;
+            return;
+        }
+        
+        // Generate insights using AI or fallback logic
+        let insights = [];
+        
+        if (typeof aiFeatures !== 'undefined') {
+            // Use AI to generate insights
+            insights = await aiFeatures.generatePortfolioInsights(records);
+        } else {
+            // Fallback insights
+            insights = generateBasicInsights(records);
+        }
+        
+        // Display insights
+        insightsDiv.innerHTML = insights.map(insight => `
+            <div class="alert alert-${insight.type} alert-sm mb-2">
+                <strong>${insight.title}</strong><br>
+                <small>${insight.message}</small>
+            </div>
+        `).join('');
+        
+    } catch (error) {
+        console.error('Error generating AI insights:', error);
+        insightsDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i> 
+                Unable to generate insights at this time.
+            </div>
+        `;
+    }
+}
+
+function generateBasicInsights(records) {
+    const insights = [];
+    const totalInvestment = records.reduce((sum, r) => sum + r.amount, 0);
+    const avgRate = records.reduce((sum, r) => sum + r.rate, 0) / records.length;
+    
+    // Investment concentration insight
+    const bankCounts = {};
+    records.forEach(r => {
+        bankCounts[r.bank] = (bankCounts[r.bank] || 0) + 1;
+    });
+    const topBank = Object.entries(bankCounts).sort((a, b) => b[1] - a[1])[0];
+    
+    if (topBank && topBank[1] > records.length * 0.6) {
+        insights.push({
+            type: 'warning',
+            title: '🏦 Bank Concentration',
+            message: `${topBank[0]} holds ${topBank[1]} of your ${records.length} FDs (${Math.round(topBank[1]/records.length*100)}%). Consider diversifying.`
+        });
+    }
+    
+    // Rate insight
+    if (avgRate < 8) {
+        insights.push({
+            type: 'info',
+            title: '📊 Interest Rate Analysis',
+            message: `Your average rate is ${avgRate.toFixed(2)}%. Current market rates may offer better returns.`
+        });
+    } else if (avgRate > 12) {
+        insights.push({
+            type: 'success',
+            title: '🎯 Excellent Rates',
+            message: `Your average rate of ${avgRate.toFixed(2)}% is above market average. Great job!`
+        });
+    }
+    
+    // Maturity insight
+    const expiringSoon = records.filter(r => {
+        const days = calculateDaysRemaining(r.maturityDate);
+        return days !== null && days <= 90;
+    });
+    
+    if (expiringSoon.length > 0) {
+        insights.push({
+            type: 'warning',
+            title: '⏰ Upcoming Maturities',
+            message: `${expiringSoon.length} FD(s) maturing in the next 90 days. Plan for renewal.`
+        });
+    }
+    
+    return insights;
+}
+
+// Initialize AI analytics when analytics tab is shown
+document.addEventListener('DOMContentLoaded', () => {
+    // Load AI settings
+    loadAISettings();
+    
+    // Generate insights when analytics tab is clicked
+    const analyticsTab = document.querySelector('button[data-bs-target="#analytics"]');
+    if (analyticsTab) {
+        analyticsTab.addEventListener('shown.bs.tab', () => {
+            setTimeout(() => {
+                refreshNotifications();
+                generateAIInsights();
+            }, 100);
+        });
+    }
+});
 // ===================================
 // FD Manager Pro - Application Part 2
 // OCR, Templates, Dashboard
@@ -2436,12 +3143,59 @@ function autoCalculateMaturity() {
 }
 
 /**
- * Suggest bank rate
+ * Suggest bank rate with AI enhancement
  */
-function suggestBankRate() {
+async function suggestBankRate() {
     const bankName = document.getElementById('fdBank').value;
-    if (!bankName) return;
+    if (!bankName) {
+        document.getElementById('suggestedRate').textContent = '';
+        return;
+    }
     
+    // Use AI smart recognition first
+    if (typeof aiFeatures !== 'undefined') {
+        try {
+            const recognition = await aiFeatures.smartBankRecognition(bankName);
+            if (recognition && recognition.confidence > 0.7) {
+                // Update bank name if AI found a better match
+                if (recognition.fullName !== bankName && recognition.confidence > 0.85) {
+                    document.getElementById('fdBank').value = recognition.fullName;
+                    showSmartSuggestion(`🤖 AI corrected bank name to: ${recognition.fullName} (${Math.round(recognition.confidence * 100)}% confidence)`);
+                }
+                
+                // Get AI rate prediction
+                const duration = parseFloat(document.getElementById('fdDuration').value) || 12;
+                const durationUnit = document.getElementById('fdDurationUnit').value || 'Months';
+                const amount = parseFloat(document.getElementById('fdAmount').value) || 1000000;
+                
+                const prediction = await aiFeatures.predictInterestRate(recognition.fullName, duration, durationUnit, amount);
+                if (prediction) {
+                    const confidenceText = prediction.confidence > 0.8 ? 'High' : prediction.confidence > 0.6 ? 'Medium' : 'Low';
+                    document.getElementById('suggestedRate').innerHTML = 
+                        `<i class="bi bi-robot"></i> AI Predicted: <strong>${prediction.rate}%</strong> 
+                        <span class="badge bg-${prediction.confidence > 0.8 ? 'success' : prediction.confidence > 0.6 ? 'warning' : 'secondary'}">${confidenceText} confidence</span>
+                        <a href="#" onclick="fillSuggestedRate(${prediction.rate}); return false;" class="ms-2">Use this</a>`;
+                    
+                    // Show AI insights if available
+                    if (prediction.factors && Object.values(prediction.factors).some(f => f !== 0)) {
+                        let insights = '🧠 AI Insights: ';
+                        if (prediction.factors.amountAdjustment > 0) insights += `Amount bonus +${prediction.factors.amountAdjustment}% `;
+                        if (prediction.factors.userAdjustment !== 0) insights += `Your history ${prediction.factors.userAdjustment > 0 ? '+' : ''}${prediction.factors.userAdjustment}% `;
+                        showSmartSuggestion(insights);
+                    }
+                    return;
+                }
+            } else if (recognition && recognition.confidence <= 0.7) {
+                document.getElementById('suggestedRate').innerHTML = 
+                    `<i class="bi bi-question-circle"></i> Low confidence match: ${recognition.fullName} (${Math.round(recognition.confidence * 100)}%)`;
+                return;
+            }
+        } catch (error) {
+            console.error('AI rate prediction failed:', error);
+        }
+    }
+    
+    // Fallback to traditional method
     const bankRateData = bankRates.find(b => b.bank === bankName);
     if (bankRateData && bankRateData.rates && bankRateData.rates.length > 0) {
         const avgRate = bankRateData.rates.reduce((sum, r) => sum + r.rate, 0) / bankRateData.rates.length;
