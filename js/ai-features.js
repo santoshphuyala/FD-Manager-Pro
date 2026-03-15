@@ -245,8 +245,11 @@ class AISmartFeatures {
     }
 
     async getMarketTrendAdjustment() {
-        // Mock market trend - in real implementation, this would fetch current market data
-        return (Math.random() - 0.5) * 0.2; // Small random adjustment
+        // FIX: Original used Math.random() giving a different adjustment every call —
+        // meaning the same bank/duration/amount could show a different "predicted rate"
+        // on each keystroke. This made the prediction widget flicker and was
+        // indistinguishable from noise. Return 0 until real market data is integrated.
+        return 0;
     }
 
     calculateRateConfidence(bank, duration, amount) {
@@ -391,15 +394,20 @@ class AISmartFeatures {
             return { error: 'Both dates are required' };
         }
 
-        const start = new Date(startDate);
+        const start    = new Date(startDate);
         const maturity = new Date(maturityDate);
-        const today = new Date();
+        // FIX: Original code called today.setHours(0,0,0,0) which mutates the Date
+        // object in-place and returns a timestamp number, not a Date. The subsequent
+        // `start < today` comparison was therefore comparing a Date against a number,
+        // which is unreliable across JS engines. Assign to a fresh variable instead.
+        const todayMidnight = new Date();
+        todayMidnight.setHours(0, 0, 0, 0);
 
         if (start > maturity) {
             return { error: 'Start date cannot be after maturity date' };
         }
 
-        if (start < today.setHours(0, 0, 0, 0)) {
+        if (start < todayMidnight) {
             return { warning: 'Start date is in the past' };
         }
 
@@ -472,6 +480,9 @@ class AISmartFeatures {
         return notification;
     }
 
+    // FIX: generateNotificationId() was defined twice in this class (here and
+    // again at line ~1077). The second definition silently overwrote the first
+    // on the prototype — always use the one definition here and remove the duplicate.
     generateNotificationId() {
         return 'notif_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
@@ -642,8 +653,19 @@ class AISmartFeatures {
 
     async generatePortfolioInsights(records) {
         const insights = [];
-        const totalInvestment = records.reduce((sum, r) => sum + r.amount, 0);
-        const avgRate = records.reduce((sum, r) => sum + r.rate, 0) / records.length;
+        // FIX: If records is empty, records.length is 0 — dividing produces NaN
+        // which then propagates silently through every avgRate comparison below,
+        // causing all insight branches to produce wrong/missing output.
+        if (!records || records.length === 0) {
+            insights.push({
+                type: 'info',
+                title: '📋 No Records',
+                message: 'Add FD records to see portfolio insights.'
+            });
+            return insights;
+        }
+        const totalInvestment = records.reduce((sum, r) => sum + (r.amount || 0), 0);
+        const avgRate = records.reduce((sum, r) => sum + (r.rate || 0), 0) / records.length;
         
         // Bank concentration analysis
         const bankAnalysis = this.analyzeBankConcentration(records);
@@ -844,19 +866,25 @@ class AISmartFeatures {
             entities: this.extractEntities(query)
         };
 
-        // Extract time expressions
+        // FIX: The time expression values called today(), tomorrow(), addDays(),
+        // addMonths() eagerly at the moment the object literal was evaluated (once
+        // per parseNaturalLanguageQuery call). That means 'today' was always the date
+        // the search was *first* run, not the actual current date. Wrapping them as
+        // thunks (functions) and calling them lazily below fixes the stale-date bug
+        // and avoids any ReferenceError if the helpers are not yet defined.
         const timeExpressions = {
-            'today': { startDate: today(), endDate: today() },
-            'tomorrow': { startDate: tomorrow(), endDate: tomorrow() },
-            'next week': { startDate: addDays(7), endDate: addDays(14) },
-            'next month': { startDate: addMonths(1), endDate: addMonths(2) },
-            'maturing': { filter: 'maturity_date', operator: '>', value: today() },
-            'expired': { filter: 'maturity_date', operator: '<', value: today() },
-            'expiring soon': { filter: 'maturity_date', operator: '<', value: addDays(30) }
+            'today':        () => ({ startDate: today(),     endDate: today() }),
+            'tomorrow':     () => ({ startDate: tomorrow(),  endDate: tomorrow() }),
+            'next week':    () => ({ startDate: addDays(7),  endDate: addDays(14) }),
+            'next month':   () => ({ startDate: addMonths(1),endDate: addMonths(2) }),
+            'maturing':     () => ({ filter: 'maturity_date', operator: '>', value: today() }),
+            'expired':      () => ({ filter: 'maturity_date', operator: '<', value: today() }),
+            'expiring soon':() => ({ filter: 'maturity_date', operator: '<', value: addDays(30) })
         };
 
-        for (const [expression, criteria] of Object.entries(timeExpressions)) {
+        for (const [expression, getCriteria] of Object.entries(timeExpressions)) {
             if (query.toLowerCase().includes(expression)) {
+                const criteria = getCriteria();
                 if (criteria.filter) {
                     parsed.filters[criteria.filter] = { operator: criteria.operator, value: criteria.value };
                 } else {
@@ -941,7 +969,9 @@ class AISmartFeatures {
     async executeSearch(parsedQuery) {
         let records = await this.getUserFDRecords();
         let maturedRecords = await this.getUserMaturedRecords();
-        const allRecords = [...records, ...maturedRecords];
+        // FIX: was `const allRecords` but the variable is reassigned inside the
+        // filter loop below — `const` throws a TypeError in strict mode. Use `let`.
+        let allRecords = [...records, ...maturedRecords];
 
         // Apply filters
         for (const [field, criteria] of Object.entries(parsedQuery.filters)) {
@@ -1072,10 +1102,6 @@ class AISmartFeatures {
         const maturity = new Date(maturityDate);
         const diffTime = maturity - today;
         return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    }
-
-    generateNotificationId() {
-        return 'notif_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
 
     getTimingReason(type, data, scheduledFor) {

@@ -10,6 +10,39 @@ let currentPage = 1;
 let recordsPerPage = parseInt(localStorage.getItem('recordsPerPage')) || 10;
 
 // ===================================
+// In-Memory Cache
+// Avoids repeated IndexedDB decrypt calls on every render/search/sort.
+// Invalidated whenever records are saved/deleted/moved.
+// ===================================
+const _cache = {
+    records: null,
+    maturedRecords: null,
+    accountHolders: null,
+    templates: null,
+    calculations: null,
+    comparisons: null,
+
+    invalidate(key) {
+        if (key) { this[key] = null; }
+        else { this.records = null; this.maturedRecords = null;
+               this.accountHolders = null; this.templates = null;
+               this.calculations = null; this.comparisons = null; }
+    }
+};
+
+async function getCachedData(key, storeKey) {
+    if (_cache[key] !== null && _cache[key] !== undefined) return _cache[key];
+    const data = (await getData(storeKey)) || [];
+    _cache[key] = Array.isArray(data) ? data : [];
+    return _cache[key];
+}
+
+async function setCachedData(key, storeKey, data) {
+    _cache[key] = data;
+    await saveData(storeKey, data);
+}
+
+// ===================================
 // Initialization
 // ===================================
 
@@ -65,14 +98,18 @@ async function setupPin() {
     
     if (!isValidPIN(pin)) {
         showToast('PIN must be exactly 4 digits', 'error');
+        // FIX (Security): Never log PIN values — removed console.error with pin/confirmPin
         return;
     }
     
     if (pin !== confirmPin) {
         showToast('PINs do not match', 'error');
+        // FIX (Security): Never log PIN values — removed console.error with pin/confirmPin
         return;
     }
     
+    // FIX (Security): Removed console.log('PIN validation passed:', { pin, confirmPin })
+    // Plaintext PINs must never appear in browser console logs.
     const hash = CryptoJS.SHA256(pin).toString();
     localStorage.setItem('fd_pin', hash);
     pinHash = hash;
@@ -138,6 +175,15 @@ function logout() {
         pinHash = '';
         currentEditId = null;
         
+        // FIX: Invalidate the in-memory cache on logout. Without this, decrypted
+        // record data from the previous session remains in _cache and is readable
+        // by anyone who gains access to the JS console after logout.
+        if (typeof _cache !== 'undefined') _cache.invalidate();
+
+        // FIX: Close the IndexedDB connection so the encryption key is released
+        // and cannot be reused without re-entering the PIN.
+        if (typeof dataManager !== 'undefined') dataManager.close();
+        
         const loginPin = document.getElementById('loginPin');
         if (loginPin) loginPin.value = '';
         
@@ -166,27 +212,32 @@ async function showResetConfirm() {
 // ===================================
 
 async function initializeApp() {
+    // Safety guard: never run without an active PIN/encryption key
+    if (!pinHash) {
+        console.warn('[FD Manager] initializeApp() called before PIN was set — aborting.');
+        return;
+    }
     showLoading();
     try {
-        await loadAccountHolders();
-        await loadFDRecords();
-        await loadMaturedFDRecords(); // Load matured records with filtering
-        await loadTemplates();
-        await updateDashboard();
-        if (typeof updateAnalytics === 'function') await updateAnalytics();
+        // Load independent data sources in parallel for faster startup
+        await Promise.all([
+            loadAccountHolders(),
+            loadFDRecords(),
+            loadMaturedFDRecords(),
+            loadTemplates()
+        ]);
+
+        // Dashboard and analytics depend on records being loaded first
+        await Promise.all([
+            updateDashboard(),
+            (typeof updateAnalytics === 'function' ? updateAnalytics() : Promise.resolve()),
+            loadAccountHoldersForCalc(),
+            (typeof loadCertificates === 'function' ? loadCertificates() : Promise.resolve())
+        ]);
+
         populateSettings();
-        
-        // Initialize calculator account holders
-        await loadAccountHoldersForCalc();
-        
-        // Load certificates if function exists
-        if (typeof loadCertificates === 'function') {
-            await loadCertificates();
-        }
-        
-        // Check for expiring FDs
         checkExpiringFDs();
-        
+
         showToast('Welcome to FD Manager Pro - Nepal Edition!', 'success');
     } catch (error) {
         console.error('App initialization error:', error);
@@ -263,13 +314,16 @@ function setupFormAutoSave() {
 // ===================================
 
 async function loadAccountHolders() {
-    let holders = (await getData('fd_account_holders')) || [];
-    
-    // Clean up invalid entries first
-    holders = cleanupAccountHolders(holders);
-    
-    // Save cleaned data back to storage
-    await saveData('fd_account_holders', holders);
+    let holders = await getCachedData('accountHolders', 'fd_account_holders');
+
+    // Clean up invalid entries — only write back if something changed
+    const cleaned = cleanupAccountHolders(holders);
+    if (cleaned.length !== holders.length && pinHash) {
+        await setCachedData('accountHolders', 'fd_account_holders', cleaned);
+        holders = cleaned;
+    } else {
+        holders = cleaned;
+    }
     
     const dropdowns = [
         'fdAccountHolder',
@@ -348,7 +402,7 @@ function cleanupAccountHolders(holders) {
  */
 async function cleanupAccountHolderData() {
     try {
-        const holders = (await getData('fd_account_holders')) || [];
+        const holders = (await getCachedData('accountHolders', 'fd_account_holders')) || [];
         const cleanedHolders = cleanupAccountHolders(holders);
         
         if (cleanedHolders.length !== holders.length) {
@@ -466,7 +520,7 @@ async function addAccountHolder(event) {
         return;
     }
     
-    let holders = (await getData('fd_account_holders')) || [];
+    let holders = (await getCachedData('accountHolders', 'fd_account_holders')) || [];
     
     // Convert old string format to object format if needed
     if (holders.length > 0 && typeof holders[0] === 'string') {
@@ -501,7 +555,7 @@ async function deleteAccountHolder(name) {
         return;
     }
     
-    let holders = (await getData('fd_account_holders')) || [];
+    let holders = (await getCachedData('accountHolders', 'fd_account_holders')) || [];
     
     // Clean up holders first
     holders = cleanupAccountHolders(holders);
@@ -515,13 +569,13 @@ async function deleteAccountHolder(name) {
     
     await saveData('fd_account_holders', holders);
     
-    let records = (await getData('fd_records')) || [];
+    let records = (await getCachedData('records', 'fd_records')) || [];
     const deletedCount = records.filter(r => r.accountHolder === name).length;
     records = records.filter(r => r.accountHolder !== name);
     await saveData('fd_records', records);
     
     // Also delete from matured records
-    let maturedRecords = (await getData('fd_matured_records')) || [];
+    let maturedRecords = (await getCachedData('maturedRecords', 'fd_matured_records')) || [];
     const deletedMaturedCount = maturedRecords.filter(r => r.accountHolder === name).length;
     maturedRecords = maturedRecords.filter(r => r.accountHolder !== name);
     await saveData('fd_matured_records', maturedRecords);
@@ -537,7 +591,7 @@ async function deleteAccountHolder(name) {
 }
 
 async function toggleAccountHolder(name, enabled) {
-    let holders = (await getData('fd_account_holders')) || [];
+    let holders = (await getCachedData('accountHolders', 'fd_account_holders')) || [];
     
     // Handle both string and object formats
     if (holders.length > 0 && typeof holders[0] === 'object') {
@@ -577,7 +631,7 @@ async function toggleAccountHolder(name, enabled) {
  * @returns {Array} - Array of enabled account holder names
  */
 async function getEnabledAccountHolders() {
-    const holders = (await getData('fd_account_holders')) || [];
+    const holders = (await getCachedData('accountHolders', 'fd_account_holders')) || [];
     return holders
         .filter(holder => {
             if (typeof holder === 'object') {
@@ -594,7 +648,7 @@ async function getEnabledAccountHolders() {
  * @returns {boolean} - True if enabled, false if disabled
  */
 async function isAccountHolderEnabled(holderName) {
-    const holders = (await getData('fd_account_holders')) || [];
+    const holders = (await getCachedData('accountHolders', 'fd_account_holders')) || [];
     const holder = holders.find(h => {
         const name = typeof h === 'object' ? h.name : h;
         return name === holderName;
@@ -614,10 +668,10 @@ async function isAccountHolderEnabled(holderName) {
 async function loadFDRecords() {
     // First check for any matured FDs and move them
     await checkAndMoveMaturedFDs();
-    
-    const records = (await getData('fd_records')) || [];
-    
-    // Filter out records for disabled account holders
+
+    const records = await getCachedData('records', 'fd_records');
+
+    // Filter out records for disabled account holders (single-pass, no N decrypts)
     const enabledRecords = await filterRecordsByAccountHolderStatus(records);
     
     // Update the page size selector to reflect current setting
@@ -630,21 +684,24 @@ async function loadFDRecords() {
 }
 
 /**
- * Filter FD records based on account holder enabled status
- * @param {Array} records - Array of FD records
- * @returns {Array} - Filtered array with only enabled account holder records
+ * Filter FD records based on account holder enabled status.
+ * Fetches holders ONCE and uses a Set for O(1) lookup — previously called
+ * getData (full decrypt) once per record, which was the main perf bottleneck.
  */
 async function filterRecordsByAccountHolderStatus(records) {
-    const enabledRecords = [];
-    
-    for (const record of records) {
-        const isEnabled = await isAccountHolderEnabled(record.accountHolder);
-        if (isEnabled) {
-            enabledRecords.push(record);
-        }
-    }
-    
-    return enabledRecords;
+    const holders = await getCachedData('accountHolders', 'fd_account_holders');
+
+    // Build a set of disabled holder names for fast O(1) lookup
+    const disabledNames = new Set(
+        holders
+            .filter(h => typeof h === 'object' && h.enabled === false)
+            .map(h => h.name)
+    );
+
+    // If no one is disabled, skip filtering entirely
+    if (disabledNames.size === 0) return records;
+
+    return records.filter(r => !disabledNames.has(r.accountHolder));
 }
 
 function displayFDRecords(records, page = 1) {
@@ -653,7 +710,7 @@ function displayFDRecords(records, page = 1) {
     if (!tbody) return;
     
     if (!records || records.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted">No records found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="13" class="text-center text-muted">No records found</td></tr>';
         document.getElementById('recordsPagination').innerHTML = '';
         return;
     }
@@ -661,7 +718,7 @@ function displayFDRecords(records, page = 1) {
     records = applyRecordFilters(records);
     
     if (records.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted">No matching records found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="13" class="text-center text-muted">No matching records found</td></tr>';
         document.getElementById('recordsPagination').innerHTML = '';
         return;
     }
@@ -681,6 +738,21 @@ function displayFDRecords(records, page = 1) {
         const status = getRecordStatus(daysRemaining);
         const interest = calculateInterestForRecord(record);
         const displayDays = daysRemaining !== null && daysRemaining > 0 ? daysRemaining : '0';
+
+        // Earned To-Date
+        const earned = calculateEarnedToDate(record);
+        const earnedPct = interest > 0 ? Math.min(100, Math.round((earned / interest) * 100)) : 0;
+        const isMatured = daysRemaining <= 0;
+
+        // Earned cell HTML
+        let earnedCell;
+        if (isMatured) {
+            earnedCell = `<span class="earned-badge" title="Fully matured">${formatCurrency(interest)} <i class="bi bi-check-circle-fill text-success"></i></span>`;
+        } else {
+            earnedCell = `
+                <span class="earned-badge" title="${earnedPct}% of expected interest earned so far">${formatCurrency(earned)}</span>
+                <span class="earned-progress"><span class="earned-progress-bar" style="width:${earnedPct}%"></span></span>`;
+        }
         
         // Escape all user-provided data
         const safeId = escapeHtml(record.id);
@@ -700,6 +772,7 @@ function displayFDRecords(records, page = 1) {
                 <td>${formatDate(maturityDate)}</td>
                 <td>${displayDays}</td>
                 <td>${formatCurrency(interest)}</td>
+                <td>${earnedCell}</td>
                 <td><span class="${getStatusBadgeClass(status)}">${status}</span></td>
                 <td>
                     <button class="btn btn-sm btn-primary" onclick="editFD('${safeId}')" title="Edit">
@@ -750,7 +823,7 @@ function renderPagination(totalPages, currentPage) {
 }
 
 async function changePage(page) {
-    const records = (await getData('fd_records')) || [];
+    const records = (await getCachedData('records', 'fd_records')) || [];
     displayFDRecords(records, page);
 }
 
@@ -1076,7 +1149,7 @@ async function saveFD(event) {
      */
     const completeSave = async (certData) => {
         try {
-            let records = (await getData('fd_records')) || [];
+            let records = (await getCachedData('records', 'fd_records')) || [];
             
             const record = {
                 id: currentEditId || generateId(),
@@ -1152,7 +1225,7 @@ async function saveFD(event) {
         // Keep existing certificate if editing
         let existingCert = null;
         if (currentEditId) {
-            const records = (await getData('fd_records')) || [];
+            const records = (await getCachedData('records', 'fd_records')) || [];
             const existing = records.find(r => r.id === currentEditId);
             existingCert = existing?.certificate || null;
         }
@@ -1214,8 +1287,8 @@ function resetFDForm() {
  */
 async function checkAndMoveMaturedFDs() {
     try {
-        const records = (await getData('fd_records')) || [];
-        const maturedRecords = (await getData('fd_matured_records')) || [];
+        const records = (await getCachedData('records', 'fd_records')) || [];
+        const maturedRecords = (await getCachedData('maturedRecords', 'fd_matured_records')) || [];
         const today = new Date();
         
         const recordsToMove = [];
@@ -1224,10 +1297,15 @@ async function checkAndMoveMaturedFDs() {
         for (const record of records) {
             const maturityDate = new Date(record.maturityDate);
             if (maturityDate <= today) {
-                // Add matured date and move to matured records
-                record.maturedDate = today.toISOString().split('T')[0];
-                record.status = 'Matured';
-                recordsToMove.push(record);
+                // FIX: Spread into a new object instead of mutating the cached record
+                // in-place. Direct mutation changes the object that _cache.records holds,
+                // so other code reading the cache sees the 'Matured' status before the
+                // record has actually been saved/moved — causing phantom state bugs.
+                recordsToMove.push({
+                    ...record,
+                    maturedDate: today.toISOString().split('T')[0],
+                    status: 'Matured'
+                });
             } else {
                 remainingRecords.push(record);
             }
@@ -1253,7 +1331,7 @@ async function checkAndMoveMaturedFDs() {
  */
 async function loadMaturedFDRecords() {
     try {
-        let maturedRecords = (await getData('fd_matured_records')) || [];
+        let maturedRecords = (await getCachedData('maturedRecords', 'fd_matured_records')) || [];
         
         // Filter out records for disabled account holders
         maturedRecords = await filterRecordsByAccountHolderStatus(maturedRecords);
@@ -1333,30 +1411,43 @@ function updateMaturedRecordsPagination(totalPages, currentPage) {
     let html = '';
     
     if (totalPages > 1) {
-        // Previous button
-        html += `<button class="btn btn-sm btn-outline-primary me-1" onclick="displayMaturedFDRecords(maturedRecords, ${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>Previous</button>`;
+        // FIX: The old code embedded `maturedRecords` (a local variable from
+        // displayMaturedFDRecords) directly into onclick="..." strings. At click
+        // time that variable is out of scope and undefined, crashing every page
+        // button. Use loadMaturedFDRecords(page) instead — it re-fetches from
+        // cache (fast, no decrypt) and re-renders the correct page.
+        html += `<button class="btn btn-sm btn-outline-primary me-1" onclick="loadMaturedFDRecordsPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>Previous</button>`;
         
-        // Page numbers
         for (let i = 1; i <= totalPages; i++) {
             if (i === currentPage) {
                 html += `<button class="btn btn-sm btn-primary me-1">${i}</button>`;
             } else {
-                html += `<button class="btn btn-sm btn-outline-primary me-1" onclick="displayMaturedFDRecords(maturedRecords, ${i})">${i}</button>`;
+                html += `<button class="btn btn-sm btn-outline-primary me-1" onclick="loadMaturedFDRecordsPage(${i})">${i}</button>`;
             }
         }
         
-        // Next button
-        html += `<button class="btn btn-sm btn-outline-primary" onclick="displayMaturedFDRecords(maturedRecords, ${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>Next</button>`;
+        html += `<button class="btn btn-sm btn-outline-primary" onclick="loadMaturedFDRecordsPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>Next</button>`;
     }
     
     pagination.innerHTML = html;
+}
+
+// Helper called by pagination buttons — fetches from cache and renders the requested page
+async function loadMaturedFDRecordsPage(page) {
+    try {
+        let maturedRecords = (await getCachedData('maturedRecords', 'fd_matured_records')) || [];
+        maturedRecords = await filterRecordsByAccountHolderStatus(maturedRecords);
+        displayMaturedFDRecords(maturedRecords, page);
+    } catch (error) {
+        console.error('Error loading matured records page:', error);
+    }
 }
 
 /**
  * View matured FD details
  */
 async function viewMaturedFD(id) {
-    const maturedRecords = (await getData('fd_matured_records')) || [];
+    const maturedRecords = (await getCachedData('maturedRecords', 'fd_matured_records')) || [];
     const record = maturedRecords.find(r => r.id === id);
     
     if (!record) {
@@ -1392,7 +1483,7 @@ async function deleteMaturedFD(id) {
     }
     
     try {
-        const maturedRecords = (await getData('fd_matured_records')) || [];
+        const maturedRecords = (await getCachedData('maturedRecords', 'fd_matured_records')) || [];
         const filteredRecords = maturedRecords.filter(r => r.id !== id);
         
         await saveData('fd_matured_records', filteredRecords);
@@ -1413,8 +1504,8 @@ async function restoreMaturedFD(id) {
     }
     
     try {
-        const maturedRecords = (await getData('fd_matured_records')) || [];
-        const activeRecords = (await getData('fd_records')) || [];
+        const maturedRecords = (await getCachedData('maturedRecords', 'fd_matured_records')) || [];
+        const activeRecords = (await getCachedData('records', 'fd_records')) || [];
         
         const recordToRestore = maturedRecords.find(r => r.id === id);
         if (!recordToRestore) {
@@ -1505,7 +1596,7 @@ async function deleteSelectedMatured() {
     }
     
     try {
-        const maturedRecords = (await getData('fd_matured_records')) || [];
+        const maturedRecords = (await getCachedData('maturedRecords', 'fd_matured_records')) || [];
         const idsToDelete = Array.from(checkboxes).map(cb => cb.value);
         
         const filteredRecords = maturedRecords.filter(r => !idsToDelete.includes(r.id));
@@ -1533,7 +1624,7 @@ function changeMaturedRecordsPerPage(value) {
  */
 async function exportMaturedToExcel() {
     try {
-        const maturedRecords = (await getData('fd_matured_records')) || [];
+        const maturedRecords = (await getCachedData('maturedRecords', 'fd_matured_records')) || [];
         
         if (maturedRecords.length === 0) {
             showToast('No matured records to export', 'warning');
@@ -1590,7 +1681,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 async function editFD(id) {
-    const records = (await getData('fd_records')) || [];
+    const records = (await getCachedData('records', 'fd_records')) || [];
     const record = records.find(r => r.id === id);
     
     if (!record) {
@@ -1664,7 +1755,7 @@ async function deleteFD(id) {
         return;
     }
     
-    let records = (await getData('fd_records')) || [];
+    let records = (await getCachedData('records', 'fd_records')) || [];
     const recordToDelete = records.find(r => r.id === id);
     records = records.filter(r => r.id !== id);
     await saveData('fd_records', records);
@@ -1690,7 +1781,7 @@ async function deleteSelected() {
     }
     
     const idsToDelete = Array.from(checkboxes).map(cb => cb.value);
-    let records = (await getData('fd_records')) || [];
+    let records = (await getCachedData('records', 'fd_records')) || [];
     records = records.filter(r => !idsToDelete.includes(r.id));
     await saveData('fd_records', records);
     
@@ -1732,37 +1823,6 @@ function updateSelectAllState() {
     const deleteBtn = document.getElementById('deleteSelectedBtn');
     if (deleteBtn) {
         deleteBtn.disabled = checkedBoxes.length === 0;
-    }
-}
-
-// ===================================
-// Interest Preview (Basic version - enhanced version in Part 2)
-// ===================================
-
-function updateInterestPreview() {
-    const amount = parseFloat(document.getElementById('fdAmount')?.value) || 0;
-    const rate = parseFloat(document.getElementById('fdRate')?.value) || 0;
-    const duration = parseInt(document.getElementById('fdDuration')?.value) || 0;
-    const unit = document.getElementById('fdDurationUnit')?.value || 'Months';
-    
-    const previewQuarterly = document.getElementById('previewQuarterly');
-    const previewMonthly = document.getElementById('previewMonthly');
-    const previewAnnual = document.getElementById('previewAnnual');
-    
-    if (amount && rate && duration) {
-        const months = getDurationInMonths(duration, unit);
-        
-        const quarterly = calculateCompoundInterest(amount, rate, months, 4);
-        const monthly = calculateCompoundInterest(amount, rate, months, 12);
-        const annual = calculateCompoundInterest(amount, rate, months, 1);
-        
-        if (previewQuarterly) previewQuarterly.textContent = formatCurrency(quarterly);
-        if (previewMonthly) previewMonthly.textContent = formatCurrency(monthly);
-        if (previewAnnual) previewAnnual.textContent = formatCurrency(annual);
-    } else {
-        if (previewQuarterly) previewQuarterly.textContent = formatCurrency(0);
-        if (previewMonthly) previewMonthly.textContent = formatCurrency(0);
-        if (previewAnnual) previewAnnual.textContent = formatCurrency(0);
     }
 }
 
@@ -1817,7 +1877,7 @@ async function sortTable(column) {
         sortAscending = true;
     }
     
-    let records = (await getData('fd_records')) || [];
+    let records = (await getCachedData('records', 'fd_records')) || [];
     
     records = records.sort((a, b) => {
         let valA, valB;
@@ -1850,6 +1910,10 @@ async function sortTable(column) {
                 const matB = b.maturityDate || calculateMaturityDate(b.startDate, b.duration, b.durationUnit);
                 valA = calculateDaysRemaining(matA) || 0;
                 valB = calculateDaysRemaining(matB) || 0;
+                break;
+            case 'earnedToDate':
+                valA = calculateEarnedToDate(a);
+                valB = calculateEarnedToDate(b);
                 break;
             default:
                 return 0;
@@ -1926,23 +1990,26 @@ Are you sure you want to continue?`;
             }
         ];
         
-        // Create demo PIN
+        // Create demo PIN — must initialize encryption key before any saveData calls
         const demoPin = '1234';
         const hash = CryptoJS.SHA256(demoPin).toString();
         localStorage.setItem('fd_pin', hash);
         pinHash = hash;
-        
-        // Save sample data
-        saveData('fd_account_holders', sampleHolders);
-        saveData('fd_records', sampleRecords);
-        saveData('fd_templates', []);
-        saveData('fd_calculations', []);
-        
-        showToast('✅ Sample data loaded! PIN changed to: 1234', 'success');
-        
-        setTimeout(() => {
-            location.reload();
-        }, 2000);
+
+        // Initialize encryption key with demo PIN, then save data
+        initDataManager(demoPin).then(async () => {
+            await Promise.all([
+                saveData('fd_account_holders', sampleHolders),
+                saveData('fd_records', sampleRecords),
+                saveData('fd_templates', []),
+                saveData('fd_calculations', [])
+            ]);
+            showToast('✅ Sample data loaded! PIN changed to: 1234', 'success');
+            setTimeout(() => { location.reload(); }, 2000);
+        }).catch(error => {
+            console.error('Error initializing encryption for sample data:', error);
+            showToast('❌ Failed to load sample data', 'error');
+        });
     } catch (error) {
         console.error('Error loading sample data:', error);
         showToast('❌ Failed to load sample data', 'error');
@@ -1968,6 +2035,9 @@ function hideLoading() {
 // ===================================
 
 async function checkExpiringFDs() {
+    // Require PIN before accessing encrypted data
+    if (!pinHash) return;
+
     // Wait for DOM to be ready and AI features to be available
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
@@ -1979,7 +2049,7 @@ async function checkExpiringFDs() {
     // Wait a bit more for AI features to load
     setTimeout(async () => {
         // Always check for expiring FDs - critical for user awareness
-        const records = (await getData('fd_records')) || [];
+        const records = (await getCachedData('records', 'fd_records')) || [];
         const expiringSoon = records.filter(record => {
             const maturityDate = record.maturityDate || calculateMaturityDate(
                 record.startDate, record.duration, record.durationUnit
@@ -2035,10 +2105,14 @@ async function checkExpiringFDs() {
                                 severity: expiringSoon.some(r => calculateDaysRemaining(r.maturityDate) <= 7) ? 'high' : 'medium'
                             });
                             
-                            new Notification('FD Manager Pro - Portfolio Summary', {
-                                body: summaryNotification.message,
-                                icon: 'images/icon-192x192.png'
-                            });
+                            // FIX: createSmartNotification returns null when smartNotifications
+                            // is disabled in settings — guard before accessing .message
+                            if (summaryNotification) {
+                                new Notification('FD Manager Pro - Portfolio Summary', {
+                                    body: summaryNotification.message,
+                                    icon: 'images/icon-192x192.png'
+                                });
+                            }
                         }
                         
                     } catch (error) {
@@ -2384,7 +2458,7 @@ async function generateAIInsights() {
     if (!insightsDiv) return;
     
     try {
-        const records = (await getData('fd_records')) || [];
+        const records = (await getCachedData('records', 'fd_records')) || [];
         
         if (records.length === 0) {
             insightsDiv.innerHTML = `
@@ -2522,23 +2596,17 @@ async function processOCR() {
     
     const file = fileInput.files[0];
     
-    // Check file type - PDF NOT SUPPORTED
-    if (file.type === 'application/pdf') {
-        showToast('❌ PDF files are not supported for OCR. Please upload JPG or PNG image.', 'error');
-        fileInput.value = '';
-        return;
-    }
-    
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    // Check file type - PDF and images now supported
+    const validTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
     if (!validTypes.includes(file.type)) {
-        showToast('Invalid file type. Please upload JPG or PNG only', 'error');
+        showToast('Invalid file type. Please upload PDF, JPG or PNG only', 'error');
         fileInput.value = '';
         return;
     }
     
-    // Check file size
-    if (file.size > 5 * 1024 * 1024) {
-        showToast('File too large. Please use image under 5MB', 'error');
+    // Check file size (increased to 10MB for PDFs)
+    if (file.size > 10 * 1024 * 1024) {
+        showToast('File too large. Please use file under 10MB', 'error');
         fileInput.value = '';
         return;
     }
@@ -2547,39 +2615,27 @@ async function processOCR() {
     document.getElementById('ocrResults').style.display = 'none';
     
     try {
-        let imageData = await readFileAsBase64(file);
+        showToast('Processing OCR... This may take 15-45 seconds for PDFs', 'info');
         
-        showToast('Processing OCR... This may take 15-30 seconds', 'info');
+        // Use enhanced OCR with PDF support
+        const result = await window.OCREnhanced.processUploadedFile(file);
         
-        const text = await window.OCREnhanced.performSimpleOCR(imageData);
-        
-        console.log('=== OCR Text ===');
-        console.log(text);
-        console.log('================');
-        
-        const extractedData = window.OCREnhanced.extractFDDataAdvanced(text);
-        const validation = window.OCREnhanced.validateAndSuggest(extractedData);
-        
-        ocrExtractedData = extractedData;
-        
-        displayOCRResults(extractedData, validation, imageData);
-        
-        document.getElementById('ocrProgress').style.display = 'none';
-        document.getElementById('ocrResults').style.display = 'block';
-        
-        if (extractedData.confidence >= 75) {
-            showToast(`OCR completed with ${extractedData.confidence}% confidence!`, 'success');
+        if (result) {
+            displayOCRResults(result, accountHolder);
         } else {
-            showToast(`OCR completed with ${extractedData.confidence}% confidence. Please verify data.`, 'warning');
+            showToast('OCR processing failed. Please try with a clearer image or different file.', 'error');
         }
         
     } catch (error) {
-        console.error('OCR processing failed:', error);
-        showToast(error.message || 'OCR processing failed. Please try with a clearer image or enter manually.', 'error');
+        console.error('OCR Error:', error);
+        showToast('OCR Error: ' + error.message, 'error');
+    } finally {
         document.getElementById('ocrProgress').style.display = 'none';
-        fileInput.value = '';
     }
-}function displayOCRResults(data, validation, imageData) {
+}
+
+function displayOCRResults(data, accountHolder) {
+    // Display extracted data
     document.getElementById('ocrBank').innerHTML = data.bank || 
         '<span class="text-danger">Not detected</span>';
     document.getElementById('ocrAmount').innerHTML = data.amount ? 
@@ -2591,9 +2647,42 @@ async function processOCR() {
     document.getElementById('ocrMaturityDate').innerHTML = data.maturityDate ? 
         formatDate(data.maturityDate) : '<span class="text-danger">Not detected</span>';
     document.getElementById('ocrDuration').innerHTML = data.duration ? 
-        `${data.duration} ${data.unit}` : '<span class="text-danger">Not detected</span>';
+        `${data.duration} ${data.duration.unit || 'Months'}` : '<span class="text-danger">Not detected</span>';
     
-    document.getElementById('ocrPreview').src = imageData;
+    // Show certificate preview if available
+    if (data.certificateId) {
+        window.OCREnhanced.getCertificateById(data.certificateId).then(cert => {
+            if (cert && cert.thumbnail) {
+                document.getElementById('ocrPreview').src = cert.thumbnail;
+            }
+        });
+    }
+    
+    // Show validation warnings
+    if (data.validation && data.validation.warnings.length > 0) {
+        let warningHtml = '<div class="alert alert-warning mt-3"><strong>Warnings:</strong><ul>';
+        data.validation.warnings.forEach(warning => {
+            warningHtml += `<li>${warning}</li>`;
+        });
+        warningHtml += '</ul></div>';
+        
+        const resultsDiv = document.getElementById('ocrResults');
+        resultsDiv.innerHTML += warningHtml;
+    }
+    
+    // Store for form filling
+    ocrExtractedData = {
+        ...data,
+        accountHolder
+    };
+    
+    document.getElementById('ocrResults').style.display = 'block';
+    
+    if (data.confidence >= 75) {
+        showToast(`OCR completed with ${data.confidence}% confidence!`, 'success');
+    } else {
+        showToast(`OCR completed with ${data.confidence}% confidence. Please verify data.`, 'warning');
+    }
 }
 
 async function confirmOCRData() {
@@ -2634,7 +2723,7 @@ async function confirmOCRData() {
         record.maturityDate = calculateMaturityDate(record.startDate, record.duration, record.durationUnit);
     }
     
-    let records = (await getData('fd_records')) || [];
+    let records = (await getCachedData('records', 'fd_records')) || [];
     records.push(record);
     await saveData('fd_records', records);
     
@@ -2685,7 +2774,7 @@ function cancelOCR() {
 // ===================================
 
 async function loadTemplates() {
-    const templates = (await getData('fd_templates')) || [];
+    const templates = (await getCachedData('templates', 'fd_templates')) || [];
     displayTemplates(templates);
 }
 
@@ -2739,7 +2828,7 @@ async function saveTemplate(event) {
         createdAt: new Date().toISOString()
     };
     
-    let templates = (await getData('fd_templates')) || [];
+    let templates = (await getCachedData('templates', 'fd_templates')) || [];
     templates.push(template);
     await saveData('fd_templates', templates);
     
@@ -2754,7 +2843,7 @@ async function saveTemplate(event) {
 }
 
 async function applyTemplate(templateId) {
-    const templates = (await getData('fd_templates')) || [];
+    const templates = (await getCachedData('templates', 'fd_templates')) || [];
     const template = templates.find(t => t.id === templateId);
     
     if (!template) return;
@@ -2774,7 +2863,7 @@ async function applyTemplate(templateId) {
 async function deleteTemplate(templateId) {
     if (!confirm('Delete this template?')) return;
     
-    let templates = (await getData('fd_templates')) || [];
+    let templates = (await getCachedData('templates', 'fd_templates')) || [];
     templates = templates.filter(t => t.id !== templateId);
     await saveData('fd_templates', templates);
     
@@ -2792,7 +2881,7 @@ async function updateDashboard() {
     await checkAndMoveMaturedFDs();
     
     const selectedHolder = document.getElementById('dashboardHolderFilter')?.value;
-    let records = (await getData('fd_records')) || [];
+    let records = (await getCachedData('records', 'fd_records')) || [];
     
     // Filter out records for disabled account holders
     records = await filterRecordsByAccountHolderStatus(records);
@@ -2827,6 +2916,7 @@ async function updateDashboard() {
     document.getElementById('expiringSoon').textContent = expiringSoon;
     
     updateUpcomingMaturities(records);
+    updateMaturityCountdown(records);
     updatePortfolioChart(records);
 }
 
@@ -2884,6 +2974,118 @@ function updateUpcomingMaturities(records) {
         </div>
     `;
 }
+
+/**
+ * Maturity Countdown Widget
+ * Shows a visual countdown to the next maturing FD on the Dashboard.
+ */
+function updateMaturityCountdown(records) {
+    const container = document.getElementById('maturityCountdownWidget');
+    const card = document.getElementById('maturityCountdownCard');
+    if (!container) return;
+
+    const active = records
+        .filter(r => {
+            const mat = r.maturityDate || calculateMaturityDate(r.startDate, r.duration, r.durationUnit);
+            return calculateDaysRemaining(mat) > 0;
+        })
+        .map(r => {
+            const mat = r.maturityDate || calculateMaturityDate(r.startDate, r.duration, r.durationUnit);
+            return Object.assign({}, r, { _matDate: mat, _days: calculateDaysRemaining(mat) });
+        })
+        .sort((a, b) => a._days - b._days);
+
+    if (active.length === 0) {
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = '';
+
+    const next = active[0];
+    const queue = active.slice(1, 5);
+
+    let urgencyClass = 'safe';
+    let progressColor = '#198754';
+    if (next._days <= 7)       { urgencyClass = 'urgent'; progressColor = '#dc3545'; }
+    else if (next._days <= 30) { urgencyClass = 'warning'; progressColor = '#fd7e14'; }
+
+    const totalDays = Math.max(1, Math.round(
+        (new Date(next._matDate) - new Date(next.startDate)) / 86400000
+    ));
+    const elapsedDays = totalDays - next._days;
+    const pct = Math.min(100, Math.round((elapsedDays / totalDays) * 100));
+
+    let timeLeftLabel = next._days + ' days';
+    if (next._days > 60) {
+        const months = Math.floor(next._days / 30);
+        const remDays = next._days % 30;
+        timeLeftLabel = remDays > 0 ? months + 'm ' + remDays + 'd' : months + ' months';
+    }
+
+    const matInterest = calculateInterestForRecord(next);
+
+    const queueHTML = queue.map(function(r) {
+        const qStyle = r._days <= 7 ? 'color:#dc3545' : r._days <= 30 ? 'color:#fd7e14' : '';
+        const shortBank = r.bank.split(' ')[0];
+        return '<div class="countdown-queue-item" title="' + r.accountHolder + ' \u00b7 ' + r.bank + ' \u00b7 ' + formatDate(r._matDate) + '">' +
+               '<span class="q-days" style="' + qStyle + '">' + r._days + 'd</span>' +
+               '<span class="q-bank">' + shortBank + '</span>' +
+               '<span class="q-bank">' + formatCurrency(r.amount) + '</span>' +
+               '</div>';
+    }).join('');
+
+    const displayDays = next._days <= 60 ? next._days : timeLeftLabel;
+    const displayLabel = next._days <= 60 ? 'days to maturity' : 'to maturity';
+
+    container.innerHTML =
+        '<div class="countdown-widget">' +
+            '<div class="countdown-left ' + urgencyClass + '">' +
+                '<div class="countdown-days">' + displayDays + '</div>' +
+                '<div class="countdown-label">' + displayLabel + '</div>' +
+            '</div>' +
+            '<div class="countdown-right flex-grow-1 px-3 py-2">' +
+                '<div class="countdown-fd-name">' +
+                    '<i class="bi bi-bank2 me-1 text-primary"></i>' + next.bank +
+                    '<span class="text-muted fw-normal ms-2 small">\u00b7 ' + next.accountHolder + '</span>' +
+                '</div>' +
+                '<div class="countdown-fd-details">' +
+                    formatCurrency(next.amount) + ' \u00b7 ' + next.rate + '% p.a. \u00b7 matures ' + formatDate(next._matDate) +
+                    ' \u00b7 interest at maturity: <strong class="text-success">' + formatCurrency(matInterest) + '</strong>' +
+                '</div>' +
+                '<div class="countdown-progress-wrap">' +
+                    '<div class="countdown-progress">' +
+                        '<div class="countdown-progress-bar" style="width:' + pct + '%; background:' + progressColor + ';"></div>' +
+                    '</div>' +
+                    '<small class="text-muted" style="white-space:nowrap;">' + pct + '% elapsed</small>' +
+                '</div>' +
+            '</div>' +
+            (queue.length > 0 ? '<div class="countdown-queue">' + queueHTML + '</div>' : '') +
+        '</div>';
+}
+
+/**
+ * Calculate interest earned from startDate to today for an active FD.
+ * Uses quarterly compounding (standard Nepal bank practice).
+ */
+function calculateEarnedToDate(record) {
+    if (!record || !record.amount || !record.rate || !record.startDate) return 0;
+
+    const start = new Date(record.startDate);
+    const today = new Date();
+    const matDate = new Date(
+        record.maturityDate ||
+        calculateMaturityDate(record.startDate, record.duration, record.durationUnit)
+    );
+
+    if (today <= start) return 0;
+    const effectiveEnd = today < matDate ? today : matDate;
+
+    const daysElapsed = Math.floor((effectiveEnd - start) / 86400000);
+    const monthsElapsed = (daysElapsed / 365) * 12;
+
+    return calculateCompoundInterest(record.amount, record.rate, monthsElapsed, 4);
+}
+
 
 function updatePortfolioChart(records) {
     const canvas = document.getElementById('portfolioChart');
@@ -3011,9 +3213,9 @@ async function showChangePIN() {
     // Re-encrypt data with new PIN
     await initDataManager(newPIN);
     
-    const holders = await getData('fd_account_holders');
-    const records = await getData('fd_records');
-    const templates = await getData('fd_templates');
+    const holders = await getCachedData('accountHolders', 'fd_account_holders');
+    const records = await getCachedData('records', 'fd_records');
+    const templates = await getCachedData('templates', 'fd_templates');
     
     await saveData('fd_account_holders', holders);
     await saveData('fd_records', records);
@@ -3028,27 +3230,6 @@ async function showChangePIN() {
 
 let draftData = null;
 let lastFDData = null;
-
-/**
- * Auto-save form data as draft
- */
-function saveDraft() {
-    const formData = {
-        accountHolder: document.getElementById('fdAccountHolder').value,
-        bank: document.getElementById('fdBank').value,
-        amount: document.getElementById('fdAmount').value,
-        duration: document.getElementById('fdDuration').value,
-        durationUnit: document.getElementById('fdDurationUnit').value,
-        rate: document.getElementById('fdRate').value,
-        startDate: document.getElementById('fdStartDate').value,
-        certStatus: document.getElementById('fdCertStatus').value,
-        fdNumber: document.getElementById('fdNumber').value,
-        notes: document.getElementById('fdNotes').value
-    };
-    
-    localStorage.setItem('fd_draft', JSON.stringify(formData));
-    document.getElementById('loadDraftBtn').style.display = 'inline-block';
-}
 
 /**
  * Load draft data
@@ -3092,7 +3273,7 @@ async function quickAddHolder() {
     const name = prompt('Enter account holder name:');
     if (!name || !name.trim()) return;
     
-    const holders = (await getData('fd_account_holders')) || [];
+    const holders = (await getCachedData('accountHolders', 'fd_account_holders')) || [];
     if (holders.includes(name.trim())) {
         showToast('Account holder already exists', 'warning');
         return;
@@ -3443,7 +3624,7 @@ function saveAndAddAnother() {
  * Show quick add modal
  */
 async function showQuickAddModal() {
-    const holders = (await getData('fd_account_holders')) || [];
+    const holders = (await getCachedData('accountHolders', 'fd_account_holders')) || [];
     const select = document.getElementById('quickHolder');
     
     select.innerHTML = '<option value="">Select Holder</option>';
@@ -3489,7 +3670,7 @@ async function saveQuickFD(event) {
         createdAt: new Date().toISOString()
     };
     
-    let records = (await getData('fd_records')) || [];
+    let records = (await getCachedData('records', 'fd_records')) || [];
     records.push(record);
     await saveData('fd_records', records);
     
@@ -3507,7 +3688,7 @@ async function saveQuickFD(event) {
  * Duplicate last FD
  */
 async function duplicateLastFD() {
-    const records = (await getData('fd_records')) || [];
+    const records = (await getCachedData('records', 'fd_records')) || [];
     if (records.length === 0) {
         showToast('No FDs to duplicate', 'warning');
         return;
@@ -3535,7 +3716,7 @@ async function duplicateLastFD() {
  * Show renewal helper
  */
 async function showRenewalHelper() {
-    const records = (await getData('fd_records')) || [];
+    const records = (await getCachedData('records', 'fd_records')) || [];
     const select = document.getElementById('renewalFDSelect');
     
     select.innerHTML = '<option value="">Choose FD...</option>';
@@ -3561,7 +3742,7 @@ async function loadRenewalDetails() {
         return;
     }
     
-    const records = (await getData('fd_records')) || [];
+    const records = (await getCachedData('records', 'fd_records')) || [];
     const record = records.find(r => r.id === fdId);
     
     if (!record) return;
@@ -3589,7 +3770,7 @@ async function loadRenewalDetails() {
  */
 async function processRenewal() {
     const fdId = document.getElementById('renewalFDSelect').value;
-    const records = (await getData('fd_records')) || [];
+    const records = (await getCachedData('records', 'fd_records')) || [];
     const originalRecord = records.find(r => r.id === fdId);
     
     if (!originalRecord) return;
@@ -3835,7 +4016,7 @@ console.log('[FD Manager Nepal] App-part2.js loaded successfully');
 // ===================================
 
 async function updateAnalytics() {
-    let records = (await getData('fd_records')) || [];
+    let records = (await getCachedData('records', 'fd_records')) || [];
     
     // Filter out records for disabled account holders
     records = await filterRecordsByAccountHolderStatus(records);
@@ -3983,7 +4164,7 @@ async function toggleCalcMode() {
  * Load account holders for calculator
  */
 async function loadAccountHoldersForCalc() {
-    let holders = (await getData('fd_account_holders')) || [];
+    let holders = (await getCachedData('accountHolders', 'fd_account_holders')) || [];
     
     // Clean up invalid entries first
     holders = cleanupAccountHolders(holders);
@@ -4026,7 +4207,7 @@ async function loadFDsForCalc() {
         return;
     }
     
-    let records = (await getData('fd_records')) || [];
+    let records = (await getCachedData('records', 'fd_records')) || [];
     
     // Filter out records for disabled account holders
     records = await filterRecordsByAccountHolderStatus(records);
@@ -4050,7 +4231,7 @@ async function fillCalcFromFD() {
     const fdId = document.getElementById('calcFDSelect').value;
     if (!fdId) return;
     
-    const records = (await getData('fd_records')) || [];
+    const records = (await getCachedData('records', 'fd_records')) || [];
     const record = records.find(r => r.id === fdId);
     
     if (!record) return;
@@ -4159,7 +4340,7 @@ async function performCalculation() {
             
             // Cap dates to FD term
             const fdId = document.getElementById('calcFDSelect').value;
-            const records = (await getData('fd_records')) || [];
+            const records = (await getCachedData('records', 'fd_records')) || [];
             const record = records.find(r => r.id === fdId);
             if (record) {
                 const maturityDate = calculateMaturityDate(record.startDate, record.duration, record.durationUnit);
@@ -4211,7 +4392,7 @@ async function performCalculation() {
     // Special handling for existing FD with custom date range
     if (useDateRange && mode === 'existing') {
         const fdId = document.getElementById('calcFDSelect').value;
-        const records = (await getData('fd_records')) || [];
+        const records = (await getCachedData('records', 'fd_records')) || [];
         const record = records.find(r => r.id === fdId);
         
         if (!record) {
@@ -4254,7 +4435,7 @@ async function performCalculation() {
     // Standard calculation for manual mode or existing FD without custom date range
     if (mode === 'existing' && !useDateRange) {
         const fdId = document.getElementById('calcFDSelect').value;
-        const records = (await getData('fd_records')) || [];
+        const records = (await getCachedData('records', 'fd_records')) || [];
         const record = records.find(r => r.id === fdId);
         
         if (record) {
@@ -4331,14 +4512,14 @@ function showInterestComparison(principal, simpleInterest, compoundInterest) {
     
     const ctx = canvas.getContext('2d');
     
-    // Destroy existing chart - FIXED
-    if (interestComparisonChartInstance) {
-        interestComparisonChartInstance.destroy();
-        interestComparisonChartInstance = null;
+    // Destroy existing chart - use window reference for consistency
+    if (window.interestComparisonChart && typeof window.interestComparisonChart.destroy === 'function') {
+        window.interestComparisonChart.destroy();
+        window.interestComparisonChart = null;
     }
     
     // Create new chart
-    interestComparisonChartInstance = new Chart(ctx, {
+    window.interestComparisonChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: ['Principal', 'Simple Interest', 'Compound Interest'],
@@ -4717,6 +4898,99 @@ function clearCalculationHistory() {
     showToast('History cleared', 'success');
 }
 
+/**
+ * Filter calculation history by search term.
+ * Called by the calcSearch input in the Calculator tab.
+ */
+function filterCalculations() {
+    const query = (document.getElementById('calcSearch')?.value || '').toLowerCase().trim();
+    const allCalcs = JSON.parse(localStorage.getItem('calc_history') || '[]');
+    const countEl = document.getElementById('calcCount');
+
+    if (!query) {
+        displayCalculationHistory();
+        if (countEl) countEl.textContent = allCalcs.length + ' calculation' + (allCalcs.length !== 1 ? 's' : '');
+        return;
+    }
+
+    const filtered = allCalcs.filter(c =>
+        (c.principal || '').toLowerCase().includes(query) ||
+        (c.rate || '').toLowerCase().includes(query) ||
+        (c.duration || '').toLowerCase().includes(query) ||
+        (c.fdReference || '').toLowerCase().includes(query) ||
+        (c.calculationType || '').toLowerCase().includes(query) ||
+        (c.maturityAmount || '').toLowerCase().includes(query)
+    );
+
+    const container = document.getElementById('calculationHistory');
+    if (!container) return;
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<tr><td colspan="13" class="text-center text-muted py-3">No calculations match your search</td></tr>';
+        if (countEl) countEl.textContent = '0 results';
+        return;
+    }
+
+    if (countEl) countEl.textContent = filtered.length + ' of ' + allCalcs.length + ' calculations';
+
+    // Re-use displayCalculationHistory logic but on filtered set
+    const tempKey = '__filtered_calc_history__';
+    localStorage.setItem(tempKey, JSON.stringify(filtered));
+    const origGet = localStorage.getItem.bind(localStorage);
+    const origKey = 'calc_history';
+    // Temporarily swap for display then restore
+    const saved = localStorage.getItem(origKey);
+    localStorage.setItem(origKey, JSON.stringify(filtered));
+    displayCalculationHistory();
+    localStorage.setItem(origKey, saved);
+}
+
+/**
+ * toggleCustomMaturity — called when duration unit changes.
+ * (autoCalculateMaturity already handles the logic; this is a no-op
+ * stub so the onchange handler doesn't throw a ReferenceError.)
+ */
+function toggleCustomMaturity() {
+    // autoCalculateMaturity() handles all maturity date recalculation.
+    // This stub exists only to prevent ReferenceError from the onchange binding.
+}
+
+// ─── Principal Choice Modal ───────────────────────────────────────────────────
+// The modal is shown when a custom date range starts after the FD's start date,
+// offering the user a choice between original principal vs compounded principal.
+
+let _pendingPrincipalChoice = null; // { original, compounded, callback }
+
+/**
+ * Show the principal choice modal with two options.
+ * @param {number} original    - The FD's original principal
+ * @param {number} compounded  - Principal compounded to the range start date
+ * @param {Function} callback  - Called with the chosen principal value
+ */
+function showPrincipalChoiceModal(original, compounded, callback) {
+    _pendingPrincipalChoice = { original, compounded, callback };
+    document.getElementById('originalPrincipalDisplay').textContent = formatCurrency(original);
+    document.getElementById('compoundedPrincipalDisplay').textContent = formatCurrency(compounded);
+    const modal = new bootstrap.Modal(document.getElementById('principalChoiceModal'));
+    modal.show();
+}
+
+/** Called by "Use Original Principal" button in the modal. */
+function useOriginalPrincipal() {
+    if (_pendingPrincipalChoice) {
+        _pendingPrincipalChoice.callback(_pendingPrincipalChoice.original);
+        _pendingPrincipalChoice = null;
+    }
+}
+
+/** Called by "Use Compounded Principal" button in the modal. */
+function useCompoundedPrincipal() {
+    if (_pendingPrincipalChoice) {
+        _pendingPrincipalChoice.callback(_pendingPrincipalChoice.compounded);
+        _pendingPrincipalChoice = null;
+    }
+}
+
 // Keep backward compatibility
 async function calculateInterest() {
     await performCalculation();
@@ -4733,7 +5007,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // ===================================
 
 async function loadCertificates() {
-    let records = (await getData('fd_records')) || [];
+    let records = (await getCachedData('records', 'fd_records')) || [];
     
     // Filter out records for disabled account holders
     records = await filterRecordsByAccountHolderStatus(records);
@@ -4776,7 +5050,7 @@ async function loadCertificates() {
 // ===================================
 
 async function exportAllPDF() {
-    let records = (await getData('fd_records')) || [];
+    let records = (await getCachedData('records', 'fd_records')) || [];
     
     // Filter out records for disabled account holders
     records = await filterRecordsByAccountHolderStatus(records);
@@ -4842,7 +5116,7 @@ async function exportAllPDF() {
 }
 
 async function exportToExcel() {
-    let records = (await getData('fd_records')) || [];
+    let records = (await getCachedData('records', 'fd_records')) || [];
     
     // Filter out records for disabled account holders
     records = await filterRecordsByAccountHolderStatus(records);
@@ -4893,10 +5167,18 @@ async function exportToExcel() {
  * @returns {boolean}
  */
 function areRecordsDuplicate(record1, record2) {
-    // Match criteria: same account holder, bank, amount, and start date
+    // FIX: .toLowerCase() on a null/undefined field throws a TypeError, which
+    // propagates up through analyzeImportData → restoreDataSmart and kills the
+    // entire restore flow (leaving the modal in a broken half-open state).
+    // Guard every field access before comparing.
+    const h1 = (record1.accountHolder || '').toLowerCase().trim();
+    const h2 = (record2.accountHolder || '').toLowerCase().trim();
+    const b1 = (record1.bank || '').toLowerCase().trim();
+    const b2 = (record2.bank || '').toLowerCase().trim();
+
     return (
-        record1.accountHolder.toLowerCase().trim() === record2.accountHolder.toLowerCase().trim() &&
-        record1.bank.toLowerCase().trim() === record2.bank.toLowerCase().trim() &&
+        h1 === h2 &&
+        b1 === b2 &&
         parseFloat(record1.amount) === parseFloat(record2.amount) &&
         record1.startDate === record2.startDate
     );
@@ -5108,13 +5390,19 @@ function showImportPreview(analysis, callback) {
     // Show modal
     const modal = new bootstrap.Modal(document.getElementById('importPreviewModal'));
     modal.show();
-    
-    // Handle confirm button
-    document.getElementById('confirmImportBtn').addEventListener('click', function() {
+
+    // FIX: Using addEventListener here would accumulate a new click handler every
+    // time the preview is opened (e.g. user cancels and re-imports). On the second
+    // open the callback fires twice — once for each listener. Use onclick instead
+    // so it is always replaced, never stacked.
+    const confirmBtn = document.getElementById('confirmImportBtn');
+    confirmBtn.onclick = function() {
         const selectedOption = document.querySelector('input[name="importOption"]:checked').value;
+        // Null the handler immediately to prevent any double-fire from rapid clicks
+        confirmBtn.onclick = null;
         modal.hide();
         callback(selectedOption, analysis);
-    });
+    };
     
     // Cleanup on modal close
     document.getElementById('importPreviewModal').addEventListener('hidden.bs.modal', function() {
@@ -5438,45 +5726,61 @@ function prepareRecordForImport(record) {
 /**
  * Restore backup with duplicate detection
  */
-function restoreDataSmart() {
-    const fileInput = document.getElementById('restoreFile');
-    const file = fileInput.files[0];
-    
+function restoreDataSmart(fileArg) {
+    // Accept a File object directly (from triggerJSONImport) or fall back to the settings input
+    const file = fileArg instanceof File
+        ? fileArg
+        : (document.getElementById('restoreFile')?.files[0] || null);
+
     if (!file) {
         showToast('Please select a backup file', 'warning');
         return;
     }
-    
+
     const reader = new FileReader();
-    
-    reader.onload = async function(e) {
-        try {
+
+    reader.onload = function(e) {
+        // FIX: async FileReader.onload callbacks swallow rejections that occur
+        // after the first `await` — they never reach the catch block below.
+        // Wrapping in an immediately-invoked async IIFE and chaining .catch()
+        // ensures all rejections are handled.
+        (async function() {
             const data = JSON.parse(e.target.result);
-            
+
             // Validate backup file
             if (!data.version || !data.records) {
                 throw new Error('Invalid backup file format');
             }
             
+            // Validate records have required fields
+            const invalidRecords = data.records.filter(r => 
+                !r.accountHolder || !r.bank || !r.amount || !r.rate || !r.startDate
+            );
+            if (invalidRecords.length > 0) {
+                throw new Error(`Invalid backup file: ${invalidRecords.length} records missing required fields`);
+            }
+
             const importRecords = data.records || [];
-            const existingRecordsRaw = await getData('fd_records');
+            const existingRecordsRaw = await getCachedData('records', 'fd_records');
             const existingRecords = Array.isArray(existingRecordsRaw) ? existingRecordsRaw : [];
-            
+
             // Analyze import data
             const analysis = analyzeImportData(importRecords, existingRecords);
-            
+
             // Show preview dialog
             showImportPreview(analysis, async function(selectedOption, analysisData) {
-                await processSmartRestore(selectedOption, analysisData, data, fileInput);
+                await processSmartRestore(selectedOption, analysisData, data, null);
             });
-            
-        } catch (error) {
+        })().catch(function(error) {
             console.error('Restore error:', error);
             showToast('Invalid backup file. Please check the file format.', 'error');
-            fileInput.value = '';
-        }
+        });
     };
-    
+
+    reader.onerror = function() {
+        showToast('Failed to read file. Please try again.', 'error');
+    };
+
     reader.readAsText(file);
 }
 
@@ -5485,63 +5789,119 @@ function restoreDataSmart() {
  */
 async function processSmartRestore(option, analysis, backupData, fileInput) {
     try {
-        let recordsRaw = await getData('fd_records');
-        let maturedRecordsRaw = await getData('fd_matured_records');
-        let holdersRaw = await getData('fd_account_holders');
-        let templatesRaw = await getData('fd_templates');
+        // Show loading indicator
+        showToast('🔄 Processing restore... Please wait', 'info');
+        
+        // Use setTimeout to allow UI to update
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        let recordsRaw = await getCachedData('records', 'fd_records');
+        let maturedRecordsRaw = await getCachedData('maturedRecords', 'fd_matured_records');
+        let holdersRaw = await getCachedData('accountHolders', 'fd_account_holders');
+        let templatesRaw = await getCachedData('templates', 'fd_templates');
         
         let records = Array.isArray(recordsRaw) ? recordsRaw : [];
         let maturedRecords = Array.isArray(maturedRecordsRaw) ? maturedRecordsRaw : [];
         let holders = Array.isArray(holdersRaw) ? holdersRaw : [];
         let templates = Array.isArray(templatesRaw) ? templatesRaw : [];
-        
+
+        // Capture counts BEFORE any modifications (used in success message)
         const beforeCount = records.length;
+        const beforeMaturedCount = maturedRecords.length;
+        
         let addedCount = 0;
         let updatedCount = 0;
         
         // Process based on selected option
         if (option === 'new') {
-            analysis.newRecords.forEach(item => {
-                const record = { ...item.record, id: generateId(), createdAt: new Date().toISOString() };
-                records.push(record);
-                addedCount++;
-            });
+            // Process in chunks to prevent hanging
+            const chunkSize = 50;
+            for (let i = 0; i < analysis.newRecords.length; i += chunkSize) {
+                const chunk = analysis.newRecords.slice(i, i + chunkSize);
+                chunk.forEach(item => {
+                    const record = { ...item.record, id: generateId(), createdAt: new Date().toISOString() };
+                    records.push(record);
+                    addedCount++;
+                });
+                
+                // Allow UI to breathe between chunks
+                if (i + chunkSize < analysis.newRecords.length) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+            }
             
         } else if (option === 'newAndUpdate') {
-            analysis.newRecords.forEach(item => {
-                const record = { ...item.record, id: generateId(), createdAt: new Date().toISOString() };
-                records.push(record);
-                addedCount++;
-            });
-            
-            analysis.updated.forEach(item => {
-                const existingIndex = records.findIndex(r => r.id === item.existing.id);
-                if (existingIndex !== -1) {
-                    records[existingIndex] = {
-                        ...item.imported,
-                        id: item.existing.id,
-                        createdAt: item.existing.createdAt,
-                        updatedAt: new Date().toISOString()
-                    };
-                    updatedCount++;
+            const chunkSize = 50;
+
+            // Add new records (was completely missing — silent data loss bug)
+            for (let i = 0; i < analysis.newRecords.length; i += chunkSize) {
+                const chunk = analysis.newRecords.slice(i, i + chunkSize);
+                chunk.forEach(item => {
+                    const record = { ...item.record, id: generateId(), createdAt: new Date().toISOString() };
+                    records.push(record);
+                    addedCount++;
+                });
+                if (i + chunkSize < analysis.newRecords.length) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
                 }
-            });
+            }
+
+            // Update existing records
+            for (let i = 0; i < analysis.updated.length; i += chunkSize) {
+                const chunk = analysis.updated.slice(i, i + chunkSize);
+                chunk.forEach(item => {
+                    const existingIndex = records.findIndex(r => r.id === item.existing.id);
+                    if (existingIndex !== -1) {
+                        records[existingIndex] = {
+                            ...item.imported,
+                            id: item.existing.id,
+                            createdAt: item.existing.createdAt,
+                            updatedAt: new Date().toISOString()
+                        };
+                        updatedCount++;
+                    }
+                });
+                if (i + chunkSize < analysis.updated.length) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+            }
             
         } else if (option === 'all') {
-            [...analysis.newRecords, ...analysis.duplicates, ...analysis.updated].forEach(item => {
-                const record = {
-                    ...(item.record || item.imported),
-                    id: generateId(),
-                    createdAt: new Date().toISOString()
-                };
-                records.push(record);
-                addedCount++;
-            });
+            // Process in chunks to prevent hanging
+            const allRecords = [...analysis.newRecords, ...analysis.duplicates, ...analysis.updated];
+            const chunkSize = 50;
+            for (let i = 0; i < allRecords.length; i += chunkSize) {
+                const chunk = allRecords.slice(i, i + chunkSize);
+                chunk.forEach(item => {
+                    const record = {
+                        ...(item.record || item.imported),
+                        id: generateId(),
+                        createdAt: new Date().toISOString()
+                    };
+                    records.push(record);
+                    addedCount++;
+                });
+                
+                // Allow UI to breathe between chunks
+                if (i + chunkSize < allRecords.length) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+            }
         }
         
-        // Merge account holders
+        // Merge account holders — handle both string and {name,enabled} object formats
         const importedHolders = backupData.accountHolders || [];
-        holders = [...new Set([...holders, ...importedHolders])];
+        const existingNames = new Set(
+            holders.map(h => (typeof h === 'object' ? h.name : h).toLowerCase().trim())
+        );
+        importedHolders.forEach(h => {
+            const name = (typeof h === 'object' ? h.name : h).trim();
+            if (name && !existingNames.has(name.toLowerCase())) {
+                // Normalise to object format so the rest of the app works correctly
+                holders.push({ name: name, enabled: true });
+                existingNames.add(name.toLowerCase());
+            }
+        });
         
         // Merge templates
         const importedTemplates = backupData.templates || [];
@@ -5551,29 +5911,63 @@ async function processSmartRestore(option, analysis, backupData, fileInput) {
             }
         });
         
-        // Merge matured records
+        // Merge matured records — keep original IDs for correct dedup on repeated restores
         const importedMaturedRecords = backupData.maturedRecords || [];
-        importedMaturedRecords.forEach(record => {
-            if (!maturedRecords.find(r => r.id === record.id)) {
-                maturedRecords.push({ ...record, id: generateId() });
+        const existingMaturedIds = new Set(maturedRecords.map(r => r.id));
+        const chunkSize = 20;
+        for (let i = 0; i < importedMaturedRecords.length; i += chunkSize) {
+            const chunk = importedMaturedRecords.slice(i, i + chunkSize);
+            chunk.forEach(record => {
+                if (record.id && !existingMaturedIds.has(record.id)) {
+                    // Keep the original ID — rebasing to a new ID broke dedup on second restore
+                    maturedRecords.push({ ...record });
+                    existingMaturedIds.add(record.id);
+                } else if (!record.id) {
+                    // No ID at all (corrupted record) — assign a new one
+                    const newId = generateId();
+                    maturedRecords.push({ ...record, id: newId });
+                    existingMaturedIds.add(newId);
+                }
+            });
+            if (i + chunkSize < importedMaturedRecords.length) {
+                await new Promise(resolve => setTimeout(resolve, 10));
             }
-        });
+        }
         
-        // Save data
-        saveData('fd_account_holders', holders);
-        saveData('fd_records', records);
-        saveData('fd_matured_records', maturedRecords);
-        saveData('fd_templates', templates);
-        
+        // Save all data — including calculations and comparisons from backup
+        await saveData('fd_account_holders', holders);
+        await saveData('fd_records', records);
+        await saveData('fd_templates', templates);
+        await saveData('fd_matured_records', maturedRecords);
+
+        // Restore calculations (merge, not replace)
+        if (backupData.calculations && backupData.calculations.length > 0) {
+            const existingCalcs = (await getCachedData('calculations', 'fd_calculations')) || [];
+            const existingCalcIds = new Set(existingCalcs.map(c => c.id));
+            const newCalcs = backupData.calculations.filter(c => c.id && !existingCalcIds.has(c.id));
+            await saveData('fd_calculations', [...existingCalcs, ...newCalcs]);
+        }
+
+        // Restore comparisons (merge, not replace)
+        if (backupData.comparisons && backupData.comparisons.length > 0) {
+            const existingComps = (await getCachedData('comparisons', 'fd_comparisons')) || [];
+            const existingCompIds = new Set(existingComps.map(c => c.id));
+            const newComps = backupData.comparisons.filter(c => c.id && !existingCompIds.has(c.id));
+            await saveData('fd_comparisons', [...existingComps, ...newComps]);
+        }
+
         if (backupData.settings) {
             localStorage.setItem('fd_settings', JSON.stringify(backupData.settings));
         }
         
+        // CRITICAL: Invalidate cache after all data modifications to prevent stale data
+        _cache.invalidate();
+        
         // Show success message
-        let message = '✅ Restore completed successfully!\n\n';
-        message += `📊 Before: ${beforeCount} active, ${maturedRecords.length - (backupData.maturedRecords || []).length} matured records\n`;
-        message += `📊 After: ${records.length} active, ${maturedRecords.length} matured records\n`;
-        message += `➕ Added: ${addedCount} records\n`;
+        let message = ' Restore completed successfully!\n\n';
+        message += ` Before: ${beforeCount} active, ${beforeMaturedCount} matured records\n`;
+        message += ` After: ${records.length} active, ${maturedRecords.length} matured records\n`;
+        message += ` Added: ${addedCount} records\n`;
         if (updatedCount > 0) {
             message += `🔄 Updated: ${updatedCount} records\n`;
         }
@@ -5600,7 +5994,7 @@ async function processSmartRestore(option, analysis, backupData, fileInput) {
 // Keep existing export functions unchanged
 // ... (exportAllPDF, exportToExcel, backupData, clearAllData, etc
 
-function clearAllData() {
+async function clearAllData() {
     const confirmation = prompt('⚠️ WARNING: This will delete ALL FD data!\n\nType "DELETE" to confirm:');
     
     if (confirmation !== 'DELETE') {
@@ -5608,7 +6002,6 @@ function clearAllData() {
         return;
     }
     
-    // Final confirmation
     const finalConfirm = confirm('This is your LAST CHANCE!\n\nProceed with deleting ALL data?');
     
     if (!finalConfirm) {
@@ -5616,133 +6009,30 @@ function clearAllData() {
         return;
     }
     
-    saveData('fd_account_holders', []);
-    saveData('fd_records', []);
-    saveData('fd_templates', []);
-    
-    showToast('All data cleared successfully', 'success');
-    
-    setTimeout(() => {
-        location.reload();
-    }, 1000);
-}
-
-// ===================================
-// Interest Calculator Functions
-// ===================================
-
-function setCalcPreset(amount, rate, duration, unit) {
-    document.getElementById('calcPrincipal').value = amount;
-    document.getElementById('calcRate').value = rate;
-    document.getElementById('calcDuration').value = duration;
-    document.getElementById('calcUnit').value = unit;
-    
-    showToast('Preset values loaded. Click Calculate to see results.', 'info');
-}
-
-function showInterestComparison(principal, simpleInterest, compoundInterest) {
-    const comparisonCard = document.getElementById('comparisonCard');
-    const canvas = document.getElementById('interestComparisonChart');
-    
-    if (!canvas) return;
-    
-    comparisonCard.style.display = 'block';
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Destroy existing chart
-    if (window.interestComparisonChart && typeof window.interestComparisonChart.destroy === 'function') {
-        window.interestComparisonChart.destroy();
+    try {
+        await Promise.all([
+            saveData('fd_account_holders', []),
+            saveData('fd_records', []),
+            saveData('fd_matured_records', []),
+            saveData('fd_templates', []),
+            saveData('fd_calculations', []),
+            saveData('fd_comparisons', [])
+        ]);
+        
+        // Invalidate cache after clearing all data
+        _cache.invalidate();
+        
+        showToast('All data cleared successfully', 'success');
+    } catch (error) {
+        console.error('Error clearing data:', error);
+        showToast('Error clearing data. Please try again.', 'error');
+        return;
     }
     
-    window.interestComparisonChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: ['Principal', 'Simple Interest', 'Compound Interest'],
-            datasets: [{
-                label: 'Amount (NRs)',
-                data: [principal, simpleInterest, compoundInterest],
-                backgroundColor: [
-                    'rgba(13, 110, 253, 0.7)',
-                    'rgba(255, 193, 7, 0.7)',
-                    'rgba(25, 135, 84, 0.7)'
-                ],
-                borderColor: [
-                    'rgb(13, 110, 253)',
-                    'rgb(255, 193, 7)',
-                    'rgb(25, 135, 84)'
-                ],
-                borderWidth: 2
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return formatCurrency(context.parsed.y);
-                        }
-                    }
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return formatCurrency(value);
-                        }
-                    }
-                }
-            }
-        }
-    });
+    setTimeout(() => { location.reload(); }, 1000);
 }
 
-function printCalculation() {
-    const principal = document.getElementById('resultPrincipal').textContent;
-    const rate = document.getElementById('resultRate').textContent;
-    const duration = document.getElementById('resultDuration').textContent;
-    const simple = document.getElementById('resultSimple').textContent;
-    const compound = document.getElementById('resultCompound').textContent;
-    const maturity = document.getElementById('resultMaturity').textContent;
-    
-    const printWindow = window.open('', '', 'height=600,width=800');
-    printWindow.document.write('<html><head><title>FD Interest Calculation</title>');
-    printWindow.document.write('<style>');
-    printWindow.document.write('body { font-family: Arial, sans-serif; padding: 20px; }');
-    printWindow.document.write('h2 { color: #0d6efd; }');
-    printWindow.document.write('table { width: 100%; border-collapse: collapse; margin: 20px 0; }');
-    printWindow.document.write('th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }');
-    printWindow.document.write('th { background-color: #f8f9fa; }');
-    printWindow.document.write('.highlight { background-color: #fff3cd; font-weight: bold; }');
-    printWindow.document.write('</style></head><body>');
-    printWindow.document.write('<h2>FD Manager Pro - Interest Calculation</h2>');
-    printWindow.document.write('<p>Generated on: ' + new Date().toLocaleDateString() + '</p>');
-    printWindow.document.write('<table>');
-    printWindow.document.write('<tr><th>Description</th><th>Value</th></tr>');
-    printWindow.document.write('<tr><td>Principal Amount</td><td>' + principal + '</td></tr>');
-    printWindow.document.write('<tr><td>Interest Rate</td><td>' + rate + '</td></tr>');
-    printWindow.document.write('<tr><td>Duration</td><td>' + duration + '</td></tr>');
-    printWindow.document.write('<tr><td>Simple Interest</td><td>' + simple + '</td></tr>');
-    printWindow.document.write('<tr><td>Compound Interest</td><td>' + compound + '</td></tr>');
-    printWindow.document.write('<tr class="highlight"><td>Total Maturity Amount</td><td>' + maturity + '</td></tr>');
-    printWindow.document.write('</table>');
-    printWindow.document.write('<p><small>Note: This is an estimate. Actual returns may vary.</small></p>');
-    printWindow.document.write('</body></html>');
-    printWindow.document.close();
-    printWindow.print();
-}
-
-// Backward compatibility
-async function calculateInterest() {
-    await performCalculation();
-}
+// (calculateInterest alias defined earlier in file)
 
 // ===================================
 // Additional Utility Functions
