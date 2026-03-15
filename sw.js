@@ -7,6 +7,7 @@ const URLS_TO_CACHE = [
   'js/utils.js',
   'js/ocr-enhanced.js',
   'js/dataManager.js',
+  'js/ai-features.js',
   'js/combined.js',
   // Add paths to your icons (from manifest.json)
   'images/icon-192x192.png',
@@ -40,46 +41,36 @@ self.addEventListener('install', (event) => {
 
 // Fetch event: serve from cache first, then network
 self.addEventListener('fetch', (event) => {
-  // Only handle http/https requests
-  if (!event.request.url.startsWith('http')) {
-    return;
-  }
-
   event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        // Cache hit - return response
-        if (response) {
-          return response;
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.match(event.request).then((cachedResponse) => {
+        if (cachedResponse) {
+          return cachedResponse; // Cache hit
         }
 
-        // Not in cache - fetch from network
-        return fetch(event.request).then(
-          (response) => {
-            // Check if we received a valid response
-            if (!response || response.status !== 200 || response.type !== 'basic' && response.type !== 'cors') {
-              return response;
-            }
-
-            // IMPORTANT: Clone the response. A response is a stream
-            // and because we want the browser to consume the response
-            // as well as the cache consuming the response, we need
-            // to clone it so we have two streams.
-            const responseToCache = response.clone();
-
-            // Cache the new response
-            caches.open(CACHE_NAME)
-              .then((cache) => {
-                cache.put(event.request, responseToCache);
-              });
-
-            return response;
+        // Cache miss — fetch from network
+        return fetch(event.request).then((networkResponse) => {
+          if (
+            networkResponse &&
+            networkResponse.status === 200 &&
+            (networkResponse.type === 'basic' || networkResponse.type === 'cors')
+          ) {
+            const responseToCache = networkResponse.clone();
+            cache.put(event.request, responseToCache).catch((err) => {
+              console.error('Cache put error:', err);
+            });
           }
-        ).catch(() => {
-          // Fallback for offline (e.g., return an offline.html page)
-          // For this app, we'll just let it fail if not in cache
+          return networkResponse;
+        }).catch((error) => {
+          console.error('Network fetch error:', error);
+          return new Response('Network error: ' + error.message, {
+            status: 503,
+            statusText: 'Service Unavailable',
+            headers: { 'Content-Type': 'text/plain' }
+          });
         });
-      })
+      });
+    })
   );
 });
 
