@@ -1101,3 +1101,233 @@ body.dark-mode .card.border-info {
         font-size: 0.875rem;
     }
 }
+
+/* ===================================
+   Maturity Countdown Widget
+   =================================== */
+
+.countdown-widget {
+    display: flex;
+    align-items: stretch;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    min-height: 100px;
+}
+
+.countdown-left {
+    background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+    color: white;
+    padding: 1.25rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 220px;
+    flex-shrink: 0;
+}
+
+.countdown-left.urgent {
+    background: linear-gradient(135deg, #dc3545 0%, #b02a37 100%);
+}
+
+.countdown-left.warning {
+    background: linear-gradient(135deg, #fd7e14 0%, #d96a0b 100%);
+}
+
+.countdown-left.safe {
+    background: linear-gradient(135deg, #198754 0%, #146c43 100%);
+}
+
+.countdown-days {
+    font-size: 3rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -2px;
+}
+
+.countdown-label {
+    font-size: 0.8rem;
+    opacity: 0.85;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 4px;
+}
+
+.countdown-right {
+    flex: 1;
+    padding: 1rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background: #fff;
+}
+
+.dark-mode .countdown-right {
+    background: #2d2d2d;
+}
+
+.countdown-fd-name {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.countdown-fd-details {
+    font-size: 0.82rem;
+    color: #6c757d;
+    margin-bottom: 0.5rem;
+}
+
+.dark-mode .countdown-fd-details {
+    color: #adb5bd;
+}
+
+.countdown-progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.countdown-progress {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: #e9ecef;
+    overflow: hidden;
+}
+
+.dark-mode .countdown-progress {
+    background: #444;
+}
+
+.countdown-progress-bar {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.6s ease;
+}
+
+.countdown-queue {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding: 0.75rem 1rem 0.75rem 0;
+    flex-shrink: 0;
+    max-width: 340px;
+    border-left: 1px solid #dee2e6;
+    align-items: center;
+}
+
+.dark-mode .countdown-queue {
+    border-left-color: #444;
+}
+
+.countdown-queue-item {
+    flex-shrink: 0;
+    background: #f8f9fa;
+    border-radius: 0.4rem;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.78rem;
+    text-align: center;
+    cursor: pointer;
+    border: 1px solid #dee2e6;
+    transition: background 0.15s;
+}
+
+.dark-mode .countdown-queue-item {
+    background: #3a3a3a;
+    border-color: #555;
+    color: #e0e0e0;
+}
+
+.countdown-queue-item:hover {
+    background: #e9ecef;
+}
+
+.dark-mode .countdown-queue-item:hover {
+    background: #4a4a4a;
+}
+
+.countdown-queue-item .q-days {
+    font-weight: 700;
+    font-size: 1rem;
+    display: block;
+}
+
+.countdown-queue-item .q-bank {
+    color: #6c757d;
+    display: block;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.countdown-no-fd {
+    text-align: center;
+    padding: 1.5rem;
+    color: #6c757d;
+}
+
+/* ===================================
+   Earned To-Date column in table
+   =================================== */
+
+.earned-badge {
+    display: inline-block;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(25, 135, 84, 0.1);
+    color: #146c43;
+    white-space: nowrap;
+}
+
+.dark-mode .earned-badge {
+    background: rgba(25, 135, 84, 0.2);
+    color: #75b798;
+}
+
+.earned-progress {
+    display: block;
+    height: 3px;
+    border-radius: 2px;
+    background: #e9ecef;
+    margin-top: 4px;
+    overflow: hidden;
+}
+
+.dark-mode .earned-progress {
+    background: #444;
+}
+
+.earned-progress-bar {
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #198754, #20c997);
+    transition: width 0.4s ease;
+}
+
+@media (max-width: 768px) {
+    .countdown-widget {
+        flex-direction: column;
+    }
+    .countdown-left {
+        min-width: unset;
+        flex-direction: row;
+        align-items: center;
+        gap: 1rem;
+        padding: 1rem;
+    }
+    .countdown-days {
+        font-size: 2.2rem;
+    }
+    .countdown-queue {
+        max-width: 100%;
+        border-left: none;
+        border-top: 1px solid #dee2e6;
+        padding: 0.5rem 1rem;
+    }
+}
