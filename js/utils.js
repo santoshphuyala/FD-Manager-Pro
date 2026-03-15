@@ -1170,6 +1170,7 @@ async function backupData() {
             version: '4.0',
             timestamp: new Date().toISOString(),
             records: (await getData('fd_records')) || [],
+            maturedRecords: (await getData('fd_matured_records')) || [],
             accountHolders: (await getData('fd_account_holders')) || [],
             templates: (await getData('fd_templates')) || [],
             settings: JSON.parse(localStorage.getItem('fd_settings') || '{}'),
@@ -1216,6 +1217,7 @@ async function backupDataToExcel() {
         }
 
         const records = (await getData('fd_records')) || [];
+        const maturedRecords = (await getData('fd_matured_records')) || [];
         const accountHolders = (await getData('fd_account_holders')) || [];
         const templates = (await getData('fd_templates')) || [];
         const calculations = (await getData('fd_calculations')) || [];
@@ -1233,6 +1235,7 @@ async function backupDataToExcel() {
             version: '4.0',
             timestamp: new Date().toISOString(),
             totalRecords: records.length,
+            totalMaturedRecords: maturedRecords.length,
             totalAccountHolders: accountHolders.length,
             totalTemplates: templates.length,
             totalCalculations: calculations.length,
@@ -1244,6 +1247,12 @@ async function backupDataToExcel() {
         // Add records sheet
         const recordsSheet = XLSX.utils.json_to_sheet(records);
         XLSX.utils.book_append_sheet(workbook, recordsSheet, 'FD_Records');
+
+        // Add matured records sheet
+        if (maturedRecords.length > 0) {
+            const maturedRecordsSheet = XLSX.utils.json_to_sheet(maturedRecords);
+            XLSX.utils.book_append_sheet(workbook, maturedRecordsSheet, 'Matured_Records');
+        }
 
         // Add account holders sheet
         const holdersSheet = XLSX.utils.json_to_sheet(accountHolders);
@@ -1267,7 +1276,7 @@ async function backupDataToExcel() {
 
         XLSX.writeFile(workbook, filename);
 
-        showToast(`✅ Excel backup created successfully! (${records.length} records)`, 'success');
+        showToast(`✅ Excel backup created successfully! (${records.length} active, ${maturedRecords.length} matured records)`, 'success');
         console.log(`[FD Manager] Excel backup created: ${filename}`);
 
     } catch (error) {
@@ -1300,6 +1309,7 @@ async function restoreDataFromExcel(file) {
 
                 // Check if required sheets exist
                 const requiredSheets = ['FD_Records', 'Account_Holders', 'Templates'];
+                const optionalSheets = ['Matured_Records'];
                 const sheetNames = workbook.SheetNames;
 
                 if (!requiredSheets.every(sheet => sheetNames.includes(sheet))) {
@@ -1312,6 +1322,9 @@ async function restoreDataFromExcel(file) {
                 const templates = XLSX.utils.sheet_to_json(workbook.Sheets['Templates']) || [];
                 const calculations = XLSX.utils.sheet_to_json(workbook.Sheets['Calculations']) || [];
                 const comparisons = XLSX.utils.sheet_to_json(workbook.Sheets['Comparisons']) || [];
+                const maturedRecords = sheetNames.includes('Matured_Records') 
+                    ? XLSX.utils.sheet_to_json(workbook.Sheets['Matured_Records']) || []
+                    : [];
 
                 // Validate records
                 if (!Array.isArray(records)) {
@@ -1322,6 +1335,7 @@ async function restoreDataFromExcel(file) {
                 const backupData = {
                     version: '4.0',
                     records: records,
+                    maturedRecords: maturedRecords,
                     accountHolders: accountHolders,
                     templates: templates,
                     calculations: calculations,

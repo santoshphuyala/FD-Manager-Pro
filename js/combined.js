@@ -4732,10 +4732,12 @@ function restoreDataSmart() {
 async function processSmartRestore(option, analysis, backupData, fileInput) {
     try {
         let recordsRaw = await getData('fd_records');
+        let maturedRecordsRaw = await getData('fd_matured_records');
         let holdersRaw = await getData('fd_account_holders');
         let templatesRaw = await getData('fd_templates');
         
         let records = Array.isArray(recordsRaw) ? recordsRaw : [];
+        let maturedRecords = Array.isArray(maturedRecordsRaw) ? maturedRecordsRaw : [];
         let holders = Array.isArray(holdersRaw) ? holdersRaw : [];
         let templates = Array.isArray(templatesRaw) ? templatesRaw : [];
         
@@ -4795,9 +4797,18 @@ async function processSmartRestore(option, analysis, backupData, fileInput) {
             }
         });
         
+        // Merge matured records
+        const importedMaturedRecords = backupData.maturedRecords || [];
+        importedMaturedRecords.forEach(record => {
+            if (!maturedRecords.find(r => r.id === record.id)) {
+                maturedRecords.push({ ...record, id: generateId() });
+            }
+        });
+        
         // Save data
         saveData('fd_account_holders', holders);
         saveData('fd_records', records);
+        saveData('fd_matured_records', maturedRecords);
         saveData('fd_templates', templates);
         
         if (backupData.settings) {
@@ -4806,13 +4817,14 @@ async function processSmartRestore(option, analysis, backupData, fileInput) {
         
         // Show success message
         let message = '✅ Restore completed successfully!\n\n';
-        message += `📊 Before: ${beforeCount} records\n`;
-        message += `📊 After: ${records.length} records\n`;
+        message += `📊 Before: ${beforeCount} active, ${maturedRecords.length - (backupData.maturedRecords || []).length} matured records\n`;
+        message += `📊 After: ${records.length} active, ${maturedRecords.length} matured records\n`;
         message += `➕ Added: ${addedCount} records\n`;
         if (updatedCount > 0) {
             message += `🔄 Updated: ${updatedCount} records\n`;
         }
-        message += '\nReloading page...';
+        message += `📋 Matured records restored: ${(backupData.maturedRecords || []).length}\n`;
+        message += '\nReloading...';
         
         alert(message);
         showToast('Restore completed. Reloading...', 'success');
