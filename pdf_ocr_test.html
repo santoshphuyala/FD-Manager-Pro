@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PDF OCR Test - Power Transmission</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+        .result { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .highlight { background: #ffeb3b; padding: 2px 4px; }
+        table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+    <h1>PDF OCR Test - Power Transmission FD Receipt</h1>
+    
+    <div class="test-section">
+        <h2>Test PDF</h2>
+        <p><strong>File:</strong> power transmission_FD receipt.pdf</p>
+        <p><strong>Expected:</strong> Should detect as Laxmi Bank Limited with auto-calculated maturity date</p>
+    </div>
+    
+    <div class="test-section">
+        <h2>OCR Processing Test</h2>
+        <button onclick="testPDFProcessing()">Test PDF OCR Processing</button>
+        <div id="pdf-results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Sample OCR Text Test</h2>
+        <button onclick="testSampleOCRText()">Test with Current OCR Text</button>
+        <div id="sample-results"></div>
+    </div>
+    
+    <script src="js/utils.js"></script>
+    <script src="js/dataManager.js"></script>
+    <script src="js/ocr-enhanced.js"></script>
+    
+    <script>
+        const pdfResults = document.getElementById('pdf-results');
+        const sampleResults = document.getElementById('sample-results');
+        
+        function testPDFProcessing() {
+            pdfResults.innerHTML = '<div class="result">Testing PDF processing with enhanced features...</div>';
+            
+            // Simulate the OCR text from your PDF
+            const pdfOCRText = `SHRGX (D890 [aQeninXy
+e /a5
+HATTISAR Duratepedts 13iaraiz (S(dTR
+o Do, oo\
+Receved sumof NPRZ0 00000000 (I Words Tty MillonOny) rom MS FOWER TRANSMISSION COMPANY NEPAL L.
+T2 rosessipa 2
+T T S`;
+            
+            try {
+                console.log('Testing PDF OCR text:', pdfOCRText);
+                
+                // Test enhanced extraction
+                const extractedData = extractFDDataFromOCR({
+                    text: pdfOCRText,
+                    confidence: 31
+                });
+                
+                console.log('PDF extraction result:', extractedData);
+                
+                let resultHTML = '<div class="result">';
+                resultHTML += '<h3>✓ PDF OCR Extraction Results</h3>';
+                
+                // Bank detection test
+                const bankStatus = extractedData.bank === 'Laxmi Bank Limited' ? 'success' : 'error';
+                resultHTML += `<p class="${bankStatus}"><strong>Bank Detection:</strong> ${extractedData.bank || 'Not detected'}`;
+                if (extractedData.bank === 'Laxmi Bank Limited') {
+                    resultHTML += ' ✓ Correctly identified as Laxmi Bank Limited';
+                } else {
+                    resultHTML += ' ✗ Failed to detect Laxmi Bank Limited';
+                }
+                resultHTML += '</p>';
+                
+                // Other fields
+                resultHTML += `<table>
+                    <tr><th>Field</th><th>Extracted Value</th><th>Status</th></tr>
+                    <tr><td>Amount</td><td>NPR ${extractedData.amount?.toLocaleString() || 'Not detected'}</td><td>${extractedData.amount > 0 ? '✓' : '✗'}</td></tr>
+                    <tr><td>Rate</td><td>${extractedData.rate}%</td><td>${extractedData.rate > 0 ? '✓' : '✗'}</td></tr>
+                    <tr><td>Duration</td><td>${extractedData.duration?.duration || 'Not detected'} ${extractedData.duration?.unit || ''}</td><td>${extractedData.duration ? '✓' : '✗'}</td></tr>
+                    <tr><td>Start Date</td><td>${extractedData.startDate || 'Not detected'}</td><td>${extractedData.startDate ? '✓' : '✗'}</td></tr>
+                    <tr><td>Maturity Date</td><td>${extractedData.maturityDate || 'Not detected'}${extractedData.maturityDateCalculated ? ' (Auto-calculated)' : ''}</td><td>${extractedData.maturityDate ? '✓' : '✗'}</td></tr>
+                    <tr><td>Holder</td><td>${extractedData.holder || 'Not detected'}</td><td>${extractedData.holder ? '✓' : '✗'}</td></tr>
+                    <tr><td>Certificate No</td><td>${extractedData.certificateNumber || 'Not detected'}</td><td>${extractedData.certificateNumber ? '✓' : '✗'}</td></tr>
+                    <tr><td>Confidence</td><td>${extractedData.confidence}%</td><td>${extractedData.confidence > 15 ? '✓' : '⚠'}</td></tr>
+                </table>`;
+                
+                resultHTML += '<details><summary>Full Raw Data</summary><pre>' + JSON.stringify(extractedData, null, 2) + '</pre></details>';
+                resultHTML += '</div>';
+                
+                pdfResults.innerHTML = resultHTML;
+                
+            } catch (error) {
+                console.error('PDF OCR Test Error:', error);
+                pdfResults.innerHTML = `<div class="result error">
+                    <h3>✗ PDF OCR Test Failed</h3>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                    <p><strong>Stack:</strong> <pre>${error.stack}</pre></p>
+                </div>`;
+            }
+        }
+        
+        function testSampleOCRText() {
+            sampleResults.innerHTML = '<div class="result">Testing various OCR text scenarios...</div>';
+            
+            const testCases = [
+                {
+                    name: "Current PDF OCR Text",
+                    text: "SHRGX (D890 [aQeninXy e /a5 HATTISAR Duratepedts 13iaraiz (S(dTR o Do, oo\\ Receved sumof NPRZ0 00000000 (I Words Tty MillonOny) rom MS FOWER TRANSMISSION COMPANY NEPAL L."
+                },
+                {
+                    name: "SHRGX Pattern Test",
+                    text: "SHRGX HATTISAR Fixed Deposit Receipt Amount NPR 20,000,000 Duration 6 months Rate 9.5%"
+                },
+                {
+                    name: "Partial Laxmi Detection",
+                    text: "l bavik bank limited deposit receipt 6 months 20 million"
+                },
+                {
+                    name: "Mixed Quality Text",
+                    text: "Laxmi Bank Ltd Fixed Deposit NPR 50,00,000 for 6 months at 9.5% p.a."
+                }
+            ];
+            
+            let resultsHTML = '<div class="result"><h3>OCR Text Test Results</h3>';
+            
+            testCases.forEach((testCase, index) => {
+                try {
+                    const result = extractFDDataFromOCR({
+                        text: testCase.text,
+                        confidence: 31
+                    });
+                    
+                    resultsHTML += `<div style="margin: 15px 0; padding: 10px; border: 1px solid #ddd;">
+                        <h4>Test ${index + 1}: ${testCase.name}</h4>
+                        <p><strong>Input:</strong> <em>"${testCase.text}"</em></p>
+                        <table style="font-size: 12px;">
+                            <tr><td>Bank:</td><td>${result.bank || 'Not detected'}</td><td>${result.bank.includes('Laxmi') ? '✓' : '⚠'}</td></tr>
+                            <tr><td>Amount:</td><td>${result.amount ? 'NPR ' + result.amount.toLocaleString() : 'Not detected'}</td><td>${result.amount > 0 ? '✓' : '✗'}</td></tr>
+                            <tr><td>Rate:</td><td>${result.rate}%</td><td>${result.rate > 0 ? '✓' : '✗'}</td></tr>
+                            <tr><td>Duration:</td><td>${result.duration?.duration || 'Not detected'} ${result.duration?.unit || ''}</td><td>${result.duration ? '✓' : '✗'}</td></tr>
+                            <tr><td>Start Date:</td><td>${result.startDate || 'Not detected'}</td><td>${result.startDate ? '✓' : '✗'}</td></tr>
+                            <tr><td>Maturity:</td><td>${result.maturityDate || 'Not detected'}${result.maturityDateCalculated ? ' (Auto-calculated)' : ''}</td><td>${result.maturityDate ? '✓' : '✗'}</td></tr>
+                        </table>
+                    </div>`;
+                    
+                } catch (error) {
+                    resultsHTML += `<div style="margin: 15px 0; padding: 10px; border: 1px solid #ff0000;">
+                        <h4>Test ${index + 1}: ${testCase.name}</h4>
+                        <p class="error">Error: ${error.message}</p>
+                    </div>`;
+                }
+            });
+            
+            resultsHTML += '</div>';
+            sampleResults.innerHTML = resultsHTML;
+        }
+        
+        // Auto-run tests on page load
+        window.addEventListener('load', () => {
+            setTimeout(testPDFProcessing, 1000);
+        });
+    </script>
+</body>
+</html>

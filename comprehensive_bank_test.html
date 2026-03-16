@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Comprehensive Nepal Bank Recognition Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+        .result { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .bank-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
+        .bank-test { border: 1px solid #ddd; padding: 10px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Comprehensive Nepal Commercial Bank Recognition Test</h1>
+    
+    <div class="test-section">
+        <h2>Test All 27 Nepal Commercial Banks</h2>
+        <button onclick="testAllBanks()">Test All Bank Recognition</button>
+        <button onclick="testFuzzyMatching()">Test Fuzzy Matching</button>
+        <button onclick="testOCRErrors()">Test OCR Error Scenarios</button>
+        <div id="bank-results"></div>
+    </div>
+    
+    <script src="js/utils.js"></script>
+    <script src="js/dataManager.js"></script>
+    <script src="js/ocr-enhanced.js"></script>
+    
+    <script>
+        const bankResults = document.getElementById('bank-results');
+        
+        const bankTestCases = [
+            {
+                name: 'Nepal Bank Limited',
+                samples: [
+                    'Nepal Bank Limited Fixed Deposit Receipt',
+                    'nepal bank fd account',
+                    'NBL deposit certificate',
+                    'nbl fixed deposit'
+                ]
+            },
+            {
+                name: 'Rastriya Banijya Bank',
+                samples: [
+                    'Rastriya Banijya Bank FD Receipt',
+                    'rbb deposit account',
+                    'Rashtriya Banijya Bank',
+                    'rastriya bank fixed deposit'
+                ]
+            },
+            {
+                name: 'Agriculture Development Bank',
+                samples: [
+                    'Agriculture Development Bank Limited',
+                    'adbl deposit certificate',
+                    'agriculture bank fd',
+                    'adb fixed deposit'
+                ]
+            },
+            {
+                name: 'Nabil Bank Limited',
+                samples: [
+                    'Nabil Bank Fixed Deposit',
+                    'nabil deposit account',
+                    'nabil bank certificate',
+                    'nabil fd receipt'
+                ]
+            },
+            {
+                name: 'Nepal Investment Bank Limited',
+                samples: [
+                    'Nepal Investment Bank FD',
+                    'nibl deposit certificate',
+                    'investment bank nepal',
+                    'nibl fixed deposit'
+                ]
+            },
+            {
+                name: 'Standard Chartered Bank Nepal',
+                samples: [
+                    'Standard Chartered Bank Nepal FD',
+                    'scb deposit account',
+                    'chartered bank nepal',
+                    'standard bank fd'
+                ]
+            },
+            {
+                name: 'Himalayan Bank Limited',
+                samples: [
+                    'Himalayan Bank Fixed Deposit',
+                    'hbl deposit certificate',
+                    'himalaya bank fd',
+                    'himalayan bank nepal'
+                ]
+            },
+            {
+                name: 'Nepal SBI Bank Limited',
+                samples: [
+                    'Nepal SBI Bank FD Receipt',
+                    'sbi deposit account',
+                    'state bank of india nepal',
+                    'nsbi fixed deposit'
+                ]
+            },
+            {
+                name: 'Nepal Bangladesh Bank Limited',
+                samples: [
+                    'Nepal Bangladesh Bank FD',
+                    'nbb deposit certificate',
+                    'bangladesh bank nepal',
+                    'nbb fixed deposit'
+                ]
+            },
+            {
+                name: 'Everest Bank Limited',
+                samples: [
+                    'Everest Bank Fixed Deposit',
+                    'ebl deposit account',
+                    'everest bank fd receipt',
+                    'everest bank nepal'
+                ]
+            },
+            {
+                name: 'Kumari Bank Limited',
+                samples: [
+                    'Kumari Bank Fixed Deposit',
+                    'kumari deposit certificate',
+                    'kbl fd account',
+                    'kumari bank fd'
+                ]
+            },
+            {
+                name: 'Laxmi Sunrise Bank Limited',
+                samples: [
+                    'Laxmi Sunrise Bank FD',
+                    'sunrise bank deposit',
+                    'laxmi bank fixed deposit',
+                    'sunrise bank fd receipt'
+                ]
+            },
+            {
+                name: 'Citizens Bank International Limited',
+                samples: [
+                    'Citizens Bank International FD',
+                    'citizens bank deposit',
+                    'cbl fd account',
+                    'citizens international bank'
+                ]
+            },
+            {
+                name: 'Prime Commercial Bank Limited',
+                samples: [
+                    'Prime Commercial Bank FD',
+                    'prime bank deposit',
+                    'pcbl fixed deposit',
+                    'prime commercial fd'
+                ]
+            },
+            {
+                name: 'Sunrise Bank Limited',
+                samples: [
+                    'Sunrise Bank Fixed Deposit',
+                    'sunrise deposit account',
+                    'sbl fd receipt',
+                    'sunrise bank certificate'
+                ]
+            },
+            {
+                name: 'Century Commercial Bank Limited',
+                samples: [
+                    'Century Commercial Bank FD',
+                    'century bank deposit',
+                    'ccbl fixed deposit',
+                    'century commercial fd'
+                ]
+            },
+            {
+                name: 'Sanima Bank Limited',
+                samples: [
+                    'Sanima Bank Fixed Deposit',
+                    'sanima deposit account',
+                    'sanima bank fd receipt',
+                    'sanima bank certificate'
+                ]
+            },
+            {
+                name: 'Machhapuchchhre Bank Limited',
+                samples: [
+                    'Machhapuchchhre Bank FD',
+                    'machhapuchhre deposit',
+                    'mbl fixed deposit',
+                    'machapuchhre bank'
+                ]
+            },
+            {
+                name: 'NIC Asia Bank Limited',
+                samples: [
+                    'NIC Asia Bank Fixed Deposit',
+                    'nicasia deposit account',
+                    'nic bank fd receipt',
+                    'nic asia certificate'
+                ]
+            },
+            {
+                name: 'Global IME Bank Limited',
+                samples: [
+                    'Global IME Bank Fixed Deposit',
+                    'gibl deposit account',
+                    'global bank fd',
+                    'ime bank certificate'
+                ]
+            },
+            {
+                name: 'NMB Bank Limited',
+                samples: [
+                    'NMB Bank Fixed Deposit',
+                    'nmb deposit account',
+                    'nmb bank fd receipt',
+                    'nmb bank certificate'
+                ]
+            },
+            {
+                name: 'Prabhu Bank Limited',
+                samples: [
+                    'Prabhu Bank Fixed Deposit',
+                    'prabhu deposit account',
+                    'pbl fd receipt',
+                    'prabhu bank certificate'
+                ]
+            },
+            {
+                name: 'Siddhartha Bank Limited',
+                samples: [
+                    'Siddhartha Bank Fixed Deposit',
+                    'siddhartha deposit account',
+                    'sbl fd receipt',
+                    'siddhartha bank certificate'
+                ]
+            },
+            {
+                name: 'Bank of Kathmandu Limited',
+                samples: [
+                    'Bank of Kathmandu Fixed Deposit',
+                    'bok deposit account',
+                    'kathmandu bank fd',
+                    'bokl certificate'
+                ]
+            },
+            {
+                name: 'Civil Bank Limited',
+                samples: [
+                    'Civil Bank Fixed Deposit',
+                    'civil deposit account',
+                    'cbl fd receipt',
+                    'civil bank certificate'
+                ]
+            },
+            {
+                name: 'Nepal Credit and Commerce Bank Limited',
+                samples: [
+                    'Nepal Credit and Commerce Bank FD',
+                    'ncc deposit account',
+                    'credit commerce bank',
+                    'ncc bank certificate'
+                ]
+            },
+            {
+                name: 'Laxmi Bank Limited',
+                samples: [
+                    'Laxmi Bank Fixed Deposit',
+                    'l bavik bank receipt',
+                    'shrgx deposit account',
+                    'laxmi bank fd certificate'
+                ]
+            }
+        ];
+        
+        function testAllBanks() {
+            bankResults.innerHTML = '<div class="result">Testing all Nepal commercial banks...</div>';
+            
+            let resultsHTML = '<div class="result"><h3>All Nepal Commercial Banks Recognition Test</h3>';
+            resultsHTML += '<div class="bank-grid">';
+            
+            let successCount = 0;
+            let totalTests = 0;
+            
+            bankTestCases.forEach(bankTest => {
+                let bankSuccess = 0;
+                let bankTotal = bankTest.samples.length;
+                
+                resultsHTML += `<div class="bank-test">
+                    <h4>${bankTest.name}</h4>
+                    <table style="font-size: 12px;">
+                        <tr><th>Test Input</th><th>Detected</th><th>Status</th></tr>`;
+                
+                bankTest.samples.forEach(sample => {
+                    totalTests++;
+                    const detected = extractBankNameEnhanced(sample);
+                    const success = detected === bankTest.name;
+                    if (success) {
+                        successCount++;
+                        bankSuccess++;
+                    }
+                    
+                    resultsHTML += `<tr>
+                        <td>"${sample}"</td>
+                        <td>${detected || 'Not detected'}</td>
+                        <td style="color: ${success ? 'green' : 'red'}">${success ? '✓' : '✗'}</td>
+                    </tr>`;
+                });
+                
+                resultsHTML += `</table>
+                    <p><strong>Bank Score:</strong> ${bankSuccess}/${bankTotal} (${Math.round(bankSuccess/bankTotal*100)}%)</p>
+                </div>`;
+            });
+            
+            resultsHTML += `</div>
+                <h3>Overall Results: ${successCount}/${totalTests} (${Math.round(successCount/totalTests*100)}%)</h3>
+                <p style="color: ${successCount/totalTests > 0.8 ? 'green' : 'orange'}">
+                    ${successCount/totalTests > 0.8 ? '✓ Excellent recognition rate!' : '⚠ Some banks need improvement'}
+                </p>
+            </div>`;
+            
+            bankResults.innerHTML = resultsHTML;
+        }
+        
+        function testFuzzyMatching() {
+            bankResults.innerHTML = '<div class="result">Testing fuzzy matching capabilities...</div>';
+            
+            const fuzzyTests = [
+                { input: 'nbl bank nepal', expected: 'Nepal Bank Limited' },
+                { input: 'rbb limited', expected: 'Rastriya Banijya Bank' },
+                { input: 'adbl bank', expected: 'Agriculture Development Bank' },
+                { input: 'nibl deposit', expected: 'Nepal Investment Bank Limited' },
+                { input: 'scb nepal', expected: 'Standard Chartered Bank Nepal' },
+                { input: 'hbl bank', expected: 'Himalayan Bank Limited' },
+                { input: 'sbi bank nepal', expected: 'Nepal SBI Bank Limited' },
+                { input: 'nbb bank', expected: 'Nepal Bangladesh Bank Limited' },
+                { input: 'ebl limited', expected: 'Everest Bank Limited' },
+                { input: 'kbl bank', expected: 'Kumari Bank Limited' },
+                { input: 'gibl bank', expected: 'Global IME Bank Limited' },
+                { input: 'nmb limited', expected: 'NMB Bank Limited' },
+                { input: 'pbl bank', expected: 'Prabhu Bank Limited' },
+                { input: 'sbl bank', expected: 'Siddhartha Bank Limited' },
+                { input: 'bok limited', expected: 'Bank of Kathmandu Limited' },
+                { input: 'cbl bank', expected: 'Civil Bank Limited' },
+                { input: 'ncc bank', expected: 'Nepal Credit and Commerce Bank Limited' },
+                { input: 'shrgx bank', expected: 'Laxmi Bank Limited' }
+            ];
+            
+            let resultsHTML = '<div class="result"><h3>Fuzzy Matching Test Results</h3>';
+            resultsHTML += '<table><tr><th>Input</th><th>Expected</th><th>Detected</th><th>Status</th></tr>';
+            
+            let successCount = 0;
+            fuzzyTests.forEach(test => {
+                const detected = extractBankNameEnhanced(test.input);
+                const success = detected === test.expected;
+                if (success) successCount++;
+                
+                resultsHTML += `<tr>
+                    <td>"${test.input}"</td>
+                    <td>${test.expected}</td>
+                    <td>${detected || 'Not detected'}</td>
+                    <td style="color: ${success ? 'green' : 'red'}">${success ? '✓' : '✗'}</td>
+                </tr>`;
+            });
+            
+            resultsHTML += `</table>
+                <h3>Fuzzy Matching Score: ${successCount}/${fuzzyTests.length} (${Math.round(successCount/fuzzyTests.length*100)}%)</h3>
+            </div>`;
+            
+            bankResults.innerHTML = resultsHTML;
+        }
+        
+        function testOCRErrors() {
+            bankResults.innerHTML = '<div class="result">Testing OCR error scenarios...</div>';
+            
+            const errorTests = [
+                { input: 'nbl bnk limtd', expected: 'Nepal Bank Limited', description: 'Common OCR typos' },
+                { input: 'rbb bnk', expected: 'Rastriya Banijya Bank', description: 'Missing letters' },
+                { input: 'nibl bnk', expected: 'Nepal Investment Bank Limited', description: 'Abbreviated form' },
+                { input: 'gibl bnk lim', expected: 'Global IME Bank Limited', description: 'Partial words' },
+                { input: 'scb bnk np', expected: 'Standard Chartered Bank Nepal', description: 'Shortened words' },
+                { input: 'hbl bnk lim', expected: 'Himalayan Bank Limited', description: 'Acronyms' },
+                { input: 'sbl bnk lim', expected: 'Siddhartha Bank Limited', description: 'Acronym conflicts' },
+                { input: 'l bavik bnk', expected: 'Laxmi Bank Limited', description: 'Severe OCR errors' },
+                { input: 'shrgx bnk', expected: 'Laxmi Bank Limited', description: 'Garbled text' },
+                { input: 'ncc bnk lim', expected: 'Nepal Credit and Commerce Bank Limited', description: 'Multiple acronyms' }
+            ];
+            
+            let resultsHTML = '<div class="result"><h3>OCR Error Scenario Test Results</h3>';
+            resultsHTML += '<table><tr><th>Scenario</th><th>Input</th><th>Expected</th><th>Detected</th><th>Status</th></tr>';
+            
+            let successCount = 0;
+            errorTests.forEach(test => {
+                const detected = extractBankNameEnhanced(test.input);
+                const success = detected === test.expected;
+                if (success) successCount++;
+                
+                resultsHTML += `<tr>
+                    <td>${test.description}</td>
+                    <td>"${test.input}"</td>
+                    <td>${test.expected}</td>
+                    <td>${detected || 'Not detected'}</td>
+                    <td style="color: ${success ? 'green' : 'red'}">${success ? '✓' : '✗'}</td>
+                </tr>`;
+            });
+            
+            resultsHTML += `</table>
+                <h3>OCR Error Handling Score: ${successCount}/${errorTests.length} (${Math.round(successCount/errorTests.length*100)}%)</h3>
+                <p style="color: ${successCount/errorTests.length > 0.7 ? 'green' : 'orange'}">
+                    ${successCount/errorTests.length > 0.7 ? '✓ Good OCR error handling!' : '⚠ OCR error handling needs improvement'}
+                </p>
+            </div>`;
+            
+            bankResults.innerHTML = resultsHTML;
+        }
+        
+        // Auto-run all tests on page load
+        window.addEventListener('load', () => {
+            setTimeout(testAllBanks, 1000);
+        });
+    </script>
+</body>
+</html>

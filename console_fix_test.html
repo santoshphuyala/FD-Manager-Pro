@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Console Error Fix Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+        .result { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .console-log { background: #000; color: #00ff00; padding: 10px; font-family: monospace; margin: 10px 0; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Console Error Fix Verification</h1>
+    
+    <div class="test-section">
+        <h2>Test Console Cleanup</h2>
+        <button onclick="testConsoleCleanup()">Test Console Logging</button>
+        <button onclick="testThumbnailGeneration()">Test Thumbnail Generation</button>
+        <div id="test-results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Expected Console Output</h2>
+        <p>After fixes, you should see:</p>
+        <ul>
+            <li>✅ No excessive "Object" logging</li>
+            <li>✅ No thumbnail generation errors</li>
+            <li>✅ Only essential OCR progress logs</li>
+            <li>✅ Clean console output</li>
+        </ul>
+    </div>
+    
+    <script src="js/utils.js"></script>
+    <script src="js/dataManager.js"></script>
+    <script src="js/ocr-enhanced.js"></script>
+    
+    <script>
+        const testResults = document.getElementById('test-results');
+        
+        function testConsoleCleanup() {
+            testResults.innerHTML = '<div class="result">Testing console cleanup...</div>';
+            
+            // Capture original console.log
+            const originalLog = console.log;
+            const logMessages = [];
+            
+            // Temporarily capture console.log
+            console.log = function(...args) {
+                logMessages.push(args.join(' '));
+                originalLog.apply(console, args);
+            };
+            
+            try {
+                // Test OCR extraction (should not log excessive objects)
+                const sampleText = "Laxmi Bank Limited Fixed Deposit NPR 5000000 6 months 9.5%";
+                const result = extractFDDataFromOCR({
+                    text: sampleText,
+                    confidence: 75
+                });
+                
+                // Test bank extraction (should not log excessive debug info)
+                const bank = extractBankNameEnhanced(sampleText);
+                
+                // Restore original console.log
+                console.log = originalLog;
+                
+                // Analyze log messages
+                const objectLogs = logMessages.filter(msg => msg.includes('[object Object]')).length;
+                const bankLogs = logMessages.filter(msg => msg.includes('Found bank')).length;
+                const ocrLogs = logMessages.filter(msg => msg.includes('OCR Text')).length;
+                
+                let resultHTML = '<div class="result"><h3>Console Cleanup Test Results</h3>';
+                resultHTML += `<p><strong>Object logs:</strong> ${objectLogs} (should be 0)</p>`;
+                resultHTML += `<p><strong>Bank detection logs:</strong> ${bankLogs} (should be 0)</p>`;
+                resultHTML += `<p><strong>OCR text logs:</strong> ${ocrLogs} (should be 0)</p>`;
+                resultHTML += `<p><strong>Total log messages:</strong> ${logMessages.length}</p>`;
+                
+                if (objectLogs === 0 && bankLogs === 0 && ocrLogs === 0) {
+                    resultHTML += '<p class="success">✅ Console cleanup successful!</p>';
+                } else {
+                    resultHTML += '<p class="error">❌ Still excessive logging detected</p>';
+                }
+                
+                resultHTML += '<details><summary>Log Messages</summary><div class="console-log">' + 
+                    logMessages.join('\n') + '</div></details>';
+                resultHTML += '</div>';
+                
+                testResults.innerHTML = resultHTML;
+                
+            } catch (error) {
+                console.log = originalLog;
+                testResults.innerHTML = `<div class="result error">
+                    <h3>❌ Test Failed</h3>
+                    <p>Error: ${error.message}</p>
+                </div>`;
+            }
+        }
+        
+        function testThumbnailGeneration() {
+            testResults.innerHTML = '<div class="result">Testing thumbnail generation...</div>';
+            
+            // Test with different file types
+            const tests = [
+                { name: 'PDF File', file: { type: 'application/pdf' } },
+                { name: 'Empty File', file: { size: 0 } },
+                { name: 'Null File', file: null }
+            ];
+            
+            let resultsHTML = '<div class="result"><h3>Thumbnail Generation Test Results</h3>';
+            
+            Promise.all(tests.map(async (test) => {
+                try {
+                    const thumbnail = await generateThumbnail(test.file);
+                    return { name: test.name, success: true, result: thumbnail.substring(0, 50) + '...' };
+                } catch (error) {
+                    return { name: test.name, success: false, error: error.message };
+                }
+            })).then(results => {
+                results.forEach(result => {
+                    resultsHTML += `<p><strong>${result.name}:</strong> `;
+                    if (result.success) {
+                        resultsHTML += `<span class="success">✅ Success</span> (${result.result})`;
+                    } else {
+                        resultsHTML += `<span class="error">❌ Failed</span> (${result.error})`;
+                    }
+                    resultsHTML += '</p>';
+                });
+                
+                resultsHTML += '</div>';
+                testResults.innerHTML = resultsHTML;
+            }).catch(error => {
+                testResults.innerHTML = `<div class="result error">
+                    <h3>❌ Thumbnail Test Failed</h3>
+                    <p>Error: ${error.message}</p>
+                </div>`;
+            });
+        }
+        
+        // Check console for existing errors
+        function checkConsoleErrors() {
+            const errors = [
+                'Permissions policy violation',
+                'Cache put error',
+                '@import rules are not allowed',
+                'Failed to load image for thumbnail'
+            ];
+            
+            const hasErrors = errors.some(error => 
+                document.body.innerHTML.includes(error) || 
+                console.error.toString().includes(error)
+            );
+            
+            if (hasErrors) {
+                testResults.innerHTML = `<div class="result warning">
+                    <h3>⚠️ Console Errors Detected</h3>
+                    <p>Some console errors may still be present. These are likely from:</p>
+                    <ul>
+                        <li>Service worker cache issues (chrome-extension:// URLs)</li>
+                        <li>CSS @import rules in build chunks</li>
+                        <li>Browser permissions policies</li>
+                    </ul>
+                    <p>These are typically non-critical and don't affect OCR functionality.</p>
+                </div>`;
+            }
+        }
+        
+        // Auto-run console check on page load
+        window.addEventListener('load', () => {
+            setTimeout(checkConsoleErrors, 2000);
+        });
+    </script>
+</body>
+</html>
