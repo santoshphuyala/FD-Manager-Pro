@@ -29,9 +29,14 @@ function setPinHash(hash) {
 }
 
 let currentEditId = null;
+let currentEditSource = 'records';
 
 function setCurrentEditId(id) {
     currentEditId = id;
+}
+
+function setCurrentEditSource(source) {
+    currentEditSource = source;
 }
 
 let currentChartType = 'pie';
@@ -290,6 +295,28 @@ function parseLocalDate(dateInput) {
     return isNaN(date.getTime()) ? null : date;
 }
 
+function normalizeDurationUnit(unit) {
+    if (!unit) return null;
+    const normalized = String(unit).trim().toLowerCase();
+
+    if (/^(business[-\s]?days?|bd|b)$/.test(normalized)) return 'BusinessDays';
+    if (/^(days?|d)$/.test(normalized)) return 'Days';
+    if (/^(months?|mos?|m)$/.test(normalized)) return 'Months';
+    if (/^(years?|yrs?|y)$/.test(normalized)) return 'Years';
+
+    return null;
+}
+
+function isLastDayOfMonth(date) {
+    if (!(date instanceof Date) || isNaN(date.getTime())) return false;
+    const month = date.getMonth();
+    return date.getDate() === new Date(date.getFullYear(), month + 1, 0).getDate();
+}
+
+function getDaysInMonth(year, month) {
+    return new Date(year, month + 1, 0).getDate();
+}
+
 /**
  * Format a local Date to "YYYY-MM-DD" string (safe for <input type="date">).
  * @param {Date} date - Local Date object
@@ -325,36 +352,119 @@ function formatDate(dateString) {
 }
 
 /**
+ * Add business days to a date (skipping weekends and optional holidays).
+ * @param {Date} baseDate
+ * @param {number} offset
+ * @param {Array<string>} [holidays] - Array of YYYY-MM-DD strings
+ * @returns {Date}
+ */
+function addBusinessDays(baseDate, offset, holidays = []) {
+    const date = new Date(baseDate);
+    const increment = offset >= 0 ? 1 : -1;
+    let remainingDays = Math.abs(Math.round(offset));
+
+    const holidaySet = new Set((holidays || []).map(d => d.trim()));
+
+    while (remainingDays > 0) {
+        date.setDate(date.getDate() + increment);
+        const day = date.getDay();
+        const formatted = toISOLocalDateString(date);
+        if (day === 0 || day === 6 || holidaySet.has(formatted)) {
+            continue;
+        }
+        remainingDays -= 1;
+    }
+
+    return date;
+}
+
+/**
  * Calculate maturity date based on start date and duration.
- * @param {string} startDate - Start date string (YYYY-MM-DD)
- * @param {number} duration  - Duration value
- * @param {string} unit      - Duration unit (Days/Months/Years)
+ * @param {string|Date} startDate - Start date string (YYYY-MM-DD) or Date object
+ * @param {number|string|object} duration - Duration value or object { duration, unit }
+ * @param {string} [unit] - Duration unit (Days/Months/Years/BusinessDays)
+ * @param {object} [options] - Optional behavior modifiers
+ * @param {Array<string>} [options.holidays] - Holiday dates (YYYY-MM-DD) to exclude for business days
  * @returns {string} Maturity date as "YYYY-MM-DD" or ''
  */
-function calculateMaturityDate(startDate, duration, unit) {
-    if (!startDate || !duration) return '';
+function calculateMaturityDate(startDate, duration, unit, options = {}) {
+    if (!startDate || duration === undefined || duration === null) return '';
 
     try {
         const start = parseLocalDate(startDate);
         if (!start) return '';
 
-        const maturity    = new Date(start);
-        const durationNum = parseInt(duration, 10);
-        if (isNaN(durationNum) || durationNum <= 0) return '';
+        let durationValue;
+        let durationUnit = unit;
 
-        switch (unit) {
+        if (typeof duration === 'object' && duration !== null && !Array.isArray(duration)) {
+            durationValue = duration.duration;
+            durationUnit = duration.unit || durationUnit;
+        } else {
+            durationValue = duration;
+        }
+
+        // Allow duration strings like "6m", "12 months", "1.5y", "30d".
+        if (typeof durationValue === 'string') {
+            const match = durationValue.trim().match(/^([+-]?\d+(?:\.\d+)?)(?:\s*(d(?:ays?)?|m(?:onths?|os?)?|y(?:ears?)?|b(?:usinessdays?)?))?$/i);
+            if (match) {
+                durationValue = parseFloat(match[1]);
+                if (!durationUnit && match[2]) {
+                    durationUnit = match[2];
+                }
+            }
+        }
+
+        const durationNum = Number(durationValue);
+        if (!Number.isFinite(durationNum)) return '';
+
+        const normalizedUnit = durationUnit ? normalizeDurationUnit(durationUnit) : null;
+        if (!normalizedUnit) {
+            console.warn(`Unknown duration unit: ${durationUnit}. Defaulting to Months.`);
+            durationUnit = 'Months';
+        }
+
+        const maturity = new Date(start);
+
+        if (durationNum === 0) {
+            return toISOLocalDateString(maturity);
+        }
+
+        switch (normalizeDurationUnit(durationUnit)) {
             case 'Days':
-                maturity.setDate(maturity.getDate() + durationNum);
+                maturity.setDate(maturity.getDate() + Math.round(durationNum));
                 break;
+            case 'BusinessDays':
+                {
+                    const businessDays = Math.round(durationNum);
+                    const holidays = Array.isArray(options.holidays) ? options.holidays : [];
+                    const result = addBusinessDays(maturity, businessDays, holidays);
+                    return toISOLocalDateString(result);
+                }
             case 'Months':
-                maturity.setMonth(maturity.getMonth() + durationNum);
+                {
+                    const wholeMonths = Math.trunc(durationNum);
+                    maturity.setMonth(maturity.getMonth() + wholeMonths);
+                    const fractional = Math.abs(durationNum - wholeMonths);
+                    if (fractional > 0) {
+                        const daysInMonth = getDaysInMonth(maturity.getFullYear(), maturity.getMonth());
+                        maturity.setDate(maturity.getDate() + Math.round(fractional * daysInMonth));
+                    }
+                }
                 break;
             case 'Years':
-                maturity.setFullYear(maturity.getFullYear() + durationNum);
+                {
+                    const wholeYears = Math.trunc(durationNum);
+                    maturity.setFullYear(maturity.getFullYear() + wholeYears);
+                    const fractional = Math.abs(durationNum - wholeYears);
+                    if (fractional > 0) {
+                        const monthsToAdd = Math.round(fractional * 12);
+                        maturity.setMonth(maturity.getMonth() + monthsToAdd);
+                    }
+                }
                 break;
             default:
-                console.warn(`Unknown duration unit: ${unit}, defaulting to months`);
-                maturity.setMonth(maturity.getMonth() + durationNum);
+                maturity.setMonth(maturity.getMonth() + Math.round(durationNum));
         }
 
         return toISOLocalDateString(maturity);

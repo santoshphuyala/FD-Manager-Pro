@@ -1167,27 +1167,67 @@ async function saveFD(event) {
                 notes,
                 updatedAt: new Date().toISOString()
             };
-            
-            if (currentEditId) {
-                // Update existing record
-                const index = records.findIndex(r => r.id === currentEditId);
-                if (index !== -1) {
-                    record.createdAt = records[index].createdAt; // Preserve original creation date
-                    records[index] = record;
-                } else {
-                    record.createdAt = new Date().toISOString();
-                    records.push(record);
-                }
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const matureDate = new Date(maturityDate);
+            matureDate.setHours(0, 0, 0, 0);
+            const shouldBeMatured = matureDate <= today;
+
+            record.status = shouldBeMatured ? 'Matured' : 'Active';
+            if (shouldBeMatured) {
+                record.maturedDate = record.maturedDate || record.maturityDate;
             } else {
-                // Add new record
-                record.createdAt = new Date().toISOString();
-                records.push(record);
+                delete record.maturedDate;
             }
-            
-            await saveData('fd_records', records);
-            
-            // Refresh UI
-            loadFDRecords();
+
+            let maturedRecords = (await getCachedData('maturedRecords', 'fd_matured_records')) || [];
+            let activeRecords = records;
+
+            const existingMaturedIndex = maturedRecords.findIndex(r => r.id === record.id);
+            const existingActiveIndex = activeRecords.findIndex(r => r.id === record.id);
+
+            // Preserve createdAt from existing record if present
+            let existingRecord = null;
+            if (existingActiveIndex !== -1) existingRecord = activeRecords[existingActiveIndex];
+            else if (existingMaturedIndex !== -1) existingRecord = maturedRecords[existingMaturedIndex];
+
+            record.createdAt = existingRecord?.createdAt || new Date().toISOString();
+
+            if (shouldBeMatured) {
+                // Move to matured group, remove from active if needed
+                if (existingActiveIndex !== -1) activeRecords.splice(existingActiveIndex, 1);
+
+                if (existingMaturedIndex !== -1) {
+                    maturedRecords[existingMaturedIndex] = record;
+                } else {
+                    maturedRecords.push(record);
+                }
+
+                await saveData('fd_matured_records', maturedRecords);
+                await saveData('fd_records', activeRecords);
+
+                // Refresh matured view
+                loadMaturedFDRecords();
+                if (typeof switchTab === 'function') switchTab('matured');
+            } else {
+                // Move to active group, remove from matured if needed
+                if (existingMaturedIndex !== -1) maturedRecords.splice(existingMaturedIndex, 1);
+
+                if (existingActiveIndex !== -1) {
+                    activeRecords[existingActiveIndex] = record;
+                } else {
+                    activeRecords.push(record);
+                }
+
+                await saveData('fd_records', activeRecords);
+                await saveData('fd_matured_records', maturedRecords);
+
+                // Refresh active view
+                loadFDRecords();
+                if (typeof switchTab === 'function') switchTab('records');
+            }
+
             updateDashboard();
             if (typeof updateAnalytics === 'function') await updateAnalytics();
             if (typeof loadCertificates === 'function') loadCertificates();
@@ -1252,6 +1292,7 @@ function resetFDForm() {
     
     // Reset edit state
     currentEditId = null;
+    currentEditSource = 'records';
     
     // Update form title
     const formTitle = document.getElementById('formTitle');
@@ -1386,7 +1427,13 @@ function displayMaturedFDRecords(records, page = 1) {
                 <td>${formatDate(maturedDate)}</td>
                 <td>${formatCurrency(interest)}</td>
                 <td>
-                    <button class="btn btn-sm btn-info" onclick="viewMaturedFD('${safeId}')" title="View">
+                    <button class="btn btn-sm btn-warning me-1" onclick="restoreAndEditMaturedFD('${safeId}')" title="Restore & Edit">
+                        <i class="bi bi-arrow-counterclockwise"></i>
+                    </button>
+                    <button class="btn btn-sm btn-primary me-1" onclick="editMaturedFD('${safeId}')" title="Edit Matured FD">
+                        <i class="bi bi-pencil-fill"></i>
+                    </button>
+                    <button class="btn btn-sm btn-info me-1" onclick="viewMaturedFD('${safeId}')" title="View">
                         <i class="bi bi-eye-fill"></i>
                     </button>
                     <button class="btn btn-sm btn-danger" onclick="deleteMaturedFD('${safeId}')" title="Delete">
@@ -1472,6 +1519,159 @@ Notes: ${record.notes || 'N/A'}
     `;
     
     alert(details.trim());
+}
+
+/**
+ * Edit matured FD record
+ */
+async function editMaturedFD(id) {
+    const maturedRecords = (await getCachedData('maturedRecords', 'fd_matured_records')) || [];
+    const record = maturedRecords.find(r => r.id === id);
+
+    if (!record) {
+        showToast('Matured record not found', 'error');
+        return;
+    }
+
+    currentEditId = id;
+    currentEditSource = 'matured';
+
+    // Switch to FD Records tab so form is visible
+    if (typeof switchTab === 'function') {
+        switchTab('records');
+    }
+
+    // Populate form fields
+    const fields = {
+        'fdAccountHolder': record.accountHolder,
+        'fdBank': record.bank,
+        'fdAmount': record.amount,
+        'fdDuration': record.duration,
+        'fdDurationUnit': record.durationUnit || 'Months',
+        'fdRate': record.rate,
+        'fdStartDate': record.startDate,
+        'fdCertStatus': record.certificateStatus || 'Not Obtained',
+        'fdNumber': record.fdNumber || '',
+        'fdNotes': record.notes || ''
+    };
+
+    Object.keys(fields).forEach(fieldId => {
+        const element = document.getElementById(fieldId);
+        if (element) {
+            element.value = fields[fieldId];
+        }
+    });
+
+    const formTitle = document.getElementById('formTitle');
+    if (formTitle) {
+        formTitle.innerHTML = '<i class="bi bi-pencil"></i> Edit Matured FD';
+    }
+
+    const cancelBtn = document.getElementById('cancelEditBtn');
+    if (cancelBtn) {
+        cancelBtn.style.display = 'inline-block';
+    }
+
+    if (record.certificate && typeof showCertificatePreview === 'function') {
+        showCertificatePreview(record.certificate);
+    }
+
+    if (typeof toggleCertificateUpload === 'function') {
+        toggleCertificateUpload();
+    }
+
+    const formCard = document.querySelector('#records .card');
+    if (formCard) {
+        formCard.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    if (typeof updateInterestPreview === 'function') updateInterestPreview();
+}
+
+/**
+ * Restore matured FD and edit
+ */
+async function restoreAndEditMaturedFD(id) {
+    const maturedRecords = (await getCachedData('maturedRecords', 'fd_matured_records')) || [];
+    const record = maturedRecords.find(r => r.id === id);
+
+    if (!record) {
+        showToast('Matured record not found', 'error');
+        return;
+    }
+
+    if (!confirm('Restore this matured FD to active records and edit it?')) {
+        return;
+    }
+
+    // Move to active records first (preserve matured metadata for now)
+    const activeRecords = (await getCachedData('records', 'fd_records')) || [];
+    const restoredRecord = {
+        ...record,
+        status: 'Active',
+        maturedDate: record.maturedDate || record.maturityDate
+    };
+
+    const existingIndex = activeRecords.findIndex(r => r.id === id);
+    if (existingIndex === -1) {
+        activeRecords.push(restoredRecord);
+    } else {
+        activeRecords[existingIndex] = restoredRecord;
+    }
+
+    const updatedMatured = maturedRecords.filter(r => r.id !== id);
+
+    await saveData('fd_records', activeRecords);
+    await saveData('fd_matured_records', updatedMatured);
+
+    // Reflect in UI
+    loadMaturedFDRecords();
+    loadFDRecords();
+
+    // Ensure records tab is active so user sees the edit form
+    if (typeof switchTab === 'function') {
+        switchTab('records');
+    }
+
+    // Set edit mode for active record
+    currentEditId = id;
+    currentEditSource = 'records';
+
+    const fields = {
+        'fdAccountHolder': record.accountHolder,
+        'fdBank': record.bank,
+        'fdAmount': record.amount,
+        'fdDuration': record.duration,
+        'fdDurationUnit': record.durationUnit || 'Months',
+        'fdRate': record.rate,
+        'fdStartDate': record.startDate,
+        'fdCertStatus': record.certificateStatus || 'Not Obtained',
+        'fdNumber': record.fdNumber || '',
+        'fdNotes': record.notes || ''
+    };
+
+    Object.keys(fields).forEach(fieldId => {
+        const element = document.getElementById(fieldId);
+        if (element) element.value = fields[fieldId];
+    });
+
+    const formTitle = document.getElementById('formTitle');
+    if (formTitle) formTitle.innerHTML = '<i class="bi bi-pencil"></i> Edit FD';
+
+    const cancelBtn = document.getElementById('cancelEditBtn');
+    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+    if (record.certificate && typeof showCertificatePreview === 'function') {
+        showCertificatePreview(record.certificate);
+    }
+    if (typeof toggleCertificateUpload === 'function') {
+        toggleCertificateUpload();
+    }
+
+    if (typeof updateInterestPreview === 'function') updateInterestPreview();
+
+    const formCard = document.querySelector('#records .card');
+    if (formCard) formCard.scrollIntoView({ behavior: 'smooth' });
 }
 
 /**
@@ -1690,6 +1890,7 @@ async function editFD(id) {
     }
     
     currentEditId = id;
+    currentEditSource = 'records';
     
     // Populate form fields
     const fields = {

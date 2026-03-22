@@ -390,40 +390,18 @@ async function loadTesseract() {
 }
 
 /**
- * Calculate maturity date from start date and duration
+ * Calculate maturity date from start date and duration (OCR helper).
  */
-function calculateMaturityDate(startDate, durationInfo) {
-    try {
-        if (!startDate || !durationInfo || !durationInfo.duration) {
-            return null;
-        }
-        
-        const start = new Date(startDate);
-        if (isNaN(start)) {
-            return null;
-        }
-        
-        const duration = durationInfo.duration;
-        const unit = durationInfo.unit || 'Months';
-        
-        let maturity = new Date(start);
-        
-        if (unit === 'Years') {
-            maturity.setFullYear(maturity.getFullYear() + duration);
-        } else if (unit === 'Months') {
-            maturity.setMonth(maturity.getMonth() + duration);
-        }
-        
-        // Format as YYYY-MM-DD
-        const year = maturity.getFullYear();
-        const month = String(maturity.getMonth() + 1).padStart(2, '0');
-        const day = String(maturity.getDate()).padStart(2, '0');
-        
-        return `${year}-${month}-${day}`;
-    } catch (error) {
-        console.error('Error calculating maturity date:', error);
+function calculateMaturityDateOCR(startDate, durationInfo) {
+    if (!startDate || !durationInfo || !durationInfo.duration) {
         return null;
     }
+
+    const duration = durationInfo.duration;
+    const unit = durationInfo.unit || 'Months';
+
+    const maturityDate = calculateMaturityDate(startDate, duration, unit);
+    return maturityDate || null;
 }
 
 /**
@@ -451,7 +429,7 @@ function extractFDDataFromOCR(ocrResult) {
     
     // Auto-calculate maturity date if missing but start date and duration are available
     if (!extractedData.maturityDate && extractedData.startDate && extractedData.duration) {
-        const calculatedMaturity = calculateMaturityDate(extractedData.startDate, extractedData.duration);
+        const calculatedMaturity = calculateMaturityDateOCR(extractedData.startDate, extractedData.duration);
         if (calculatedMaturity) {
             extractedData.maturityDate = calculatedMaturity;
             extractedData.maturityDateCalculated = true;
